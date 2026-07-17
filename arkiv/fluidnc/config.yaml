@@ -1,0 +1,85 @@
+# FluidNC-konfig — skrivemaskin (4xiDraw-klon) på MKS DLC32 v2.1
+#
+# Basert på offisiell MKS_DLC32_v21_laser.yaml:
+# https://github.com/bdring/fluidnc-config-files/blob/main/official/MKS_DLC32_v21_laser.yaml
+# Laserseksjon fjernet, Z-akse endret til RC-servo (penneløft) på gpio.32.
+#
+# Flash FluidNC via https://installer.fluidnc.com, last opp denne via WebUI.
+#
+# - Step/dir går via I2S-skiftregister (I2SO.x) — ikke endre til gpio
+# - Servo kan IKKE ligge på I2SO — trenger ekte GPIO med PWM (gpio.32,
+#   TTL/laser-headeren: signal der, 5 V til servo fra ekspansjonsheader)
+# - Diagonal bevegelse ved jog: bytt "Cartesian:" til "CoreXY:" under kinematics
+# - Speilvendt akse: bytt :high/:low på direction_pin
+# - steps_per_mm 80 = 20T GT2 ved 1/16 microstepping — VERIFISER med
+#   100 mm-test, TMC2209 standalone-microstepping avhenger av MS-pinnene
+
+name: skrivemaskin
+board: MKS DLC32 v2.1
+
+kinematics:
+  Cartesian:
+
+stepping:
+  engine: I2S_STATIC
+  idle_ms: 250
+  pulse_us: 4
+  dir_delay_us: 1
+  disable_delay_us: 0
+
+i2so:
+  bck_pin: gpio.16
+  data_pin: gpio.21
+  ws_pin: gpio.17
+
+spi:
+  miso_pin: gpio.12
+  mosi_pin: gpio.13
+  sck_pin: gpio.14
+
+sdcard:
+  cs_pin: gpio.15
+  card_detect_pin: NO_PIN
+
+axes:
+  shared_stepper_disable_pin: I2SO.0
+
+  x:
+    steps_per_mm: 80
+    max_rate_mm_per_min: 8000
+    acceleration_mm_per_sec2: 500
+    max_travel_mm: 280        # A4 bredde + margin, juster etter bygg
+    soft_limits: false
+    # Homing valgfritt — endstop på gpio.36 (X-) om montert
+    motor0:
+      stepstick:
+        step_pin: I2SO.1
+        direction_pin: I2SO.2
+
+  y:
+    steps_per_mm: 80
+    max_rate_mm_per_min: 8000
+    acceleration_mm_per_sec2: 500
+    max_travel_mm: 200        # A4 høyde (landskap) + margin
+    soft_limits: false
+    # Endstop på gpio.35 (Y-) om montert
+    motor0:
+      stepstick:
+        step_pin: I2SO.5
+        direction_pin: I2SO.6
+
+  # Penneløft: SG90 som Z-akse. Pen ned = Z0, pen opp = Z5 (e.l.)
+  # Kalibrer min/max_pulse_us mot servohorn-geometrien — start forsiktig
+  # så hornet ikke kjører i mekanisk stopp.
+  z:
+    steps_per_mm: 100
+    max_rate_mm_per_min: 5000
+    acceleration_mm_per_sec2: 200
+    max_travel_mm: 10
+    soft_limits: false
+    motor0:
+      rc_servo:
+        output_pin: gpio.32
+        pwm_hz: 50
+        min_pulse_us: 1000
+        max_pulse_us: 2000

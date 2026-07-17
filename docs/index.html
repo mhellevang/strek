@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>strek — SVG to pen-plotter G-code</title>
+<meta name="description" content="Generate pen-plotter G-code for a Bambu Lab P2S (UMTS pen module) from an SVG, entirely in your browser.">
+<style>
+  :root {
+    --paper: #FBFBF8;
+    --sheet: #FFFFFF;
+    --ink: #1C2740;
+    --muted: #5B6675;
+    --rule: #C9CFD8;
+    --grid: #E7EBF0;
+    --blue: #2B50C8;
+    --red: #C63A2F;
+    --amber: #9A6A08;
+    --shade: #EFEFE9;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  [hidden] { display: none !important; }
+  html, body { background: var(--paper); color: var(--ink); }
+  body {
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.45;
+    padding: 20px;
+  }
+
+  /* Drawing-sheet frame: double border like an engineering drawing */
+  .sheet {
+    max-width: 1180px;
+    margin: 0 auto;
+    border: 1.5px solid var(--ink);
+    outline: 1px solid var(--ink);
+    outline-offset: 3px;
+    background: var(--paper);
+    padding: 26px 28px 0;
+  }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+  }
+  h1 .caret { color: var(--blue); }
+  .tagline { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
+
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: 28px; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  /* ------- controls column ------- */
+  .microlabel {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  fieldset { border: none; border-top: 1px solid var(--rule); padding: 12px 0 14px; }
+  legend { padding-right: 10px; }
+  .row { display: flex; gap: 10px; margin-top: 8px; }
+  .field { flex: 1; min-width: 0; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
+  input[type="number"], select {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--ink);
+    background: var(--sheet);
+    border: 1px solid var(--rule);
+    border-radius: 0;
+    padding: 5px 7px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible, .drop:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 1px;
+  }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  .drop {
+    display: block;
+    width: 100%;
+    border: 1.5px dashed var(--rule);
+    background: var(--sheet);
+    padding: 26px 14px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .drop strong { color: var(--ink); }
+  .drop.armed { border-color: var(--blue); color: var(--blue); }
+  .drop .file { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-all; }
+
+  .actions { display: grid; gap: 8px; margin: 16px 0 8px; }
+  button {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    letter-spacing: 0.05em;
+    padding: 10px 14px;
+    border-radius: 0;
+    cursor: pointer;
+    border: 1px solid var(--ink);
+    background: var(--sheet);
+    color: var(--ink);
+  }
+  button.primary { background: var(--ink); color: var(--paper); }
+  button.primary:disabled { background: var(--rule); border-color: var(--rule); color: var(--sheet); cursor: not-allowed; }
+  button:not(.primary):hover { border-color: var(--blue); color: var(--blue); }
+  button.primary:not(:disabled):hover { background: var(--blue); border-color: var(--blue); }
+
+  .messages { display: grid; gap: 6px; margin-top: 10px; }
+  .msg { font-family: var(--mono); font-size: 12px; padding: 7px 9px; border-left: 3px solid; }
+  .msg.warn { color: var(--amber); border-color: var(--amber); background: rgba(154,106,8,.06); }
+  .msg.stop { color: var(--red); border-color: var(--red); background: rgba(198,58,47,.06); }
+
+  /* ------- preview + title block ------- */
+  .bedwrap { background: var(--sheet); border: 1px solid var(--rule); padding: 14px; }
+  .bedwrap svg { display: block; width: 100%; height: auto; }
+
+  .titleblock {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    border: 1px solid var(--ink);
+    border-top: none;
+    background: var(--sheet);
+  }
+  .tb {
+    padding: 7px 10px 8px;
+    border-right: 1px solid var(--rule);
+    min-width: 0;
+  }
+  .tb:last-child { border-right: none; }
+  .tb .v { font-family: var(--mono); font-size: 12.5px; margin-top: 1px; overflow-wrap: anywhere; }
+  @media (max-width: 880px) { .titleblock { grid-template-columns: repeat(3, 1fr); } .tb { border-bottom: 1px solid var(--rule); } }
+
+  footer {
+    margin: 22px -28px 0;
+    padding: 12px 28px;
+    border-top: 1px solid var(--ink);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  footer a { color: var(--blue); }
+
+  /* toolpath draw-in animation */
+  @media (prefers-reduced-motion: no-preference) {
+    .plotanim { animation: plot 2.8s linear forwards; }
+    @keyframes plot { to { stroke-dashoffset: 0; } }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1>strek<span class="caret">_</span></h1>
+    <p class="tagline">SVG &#8594; pen-plotter G-code &#183; Bambu Lab P2S + UMTS pen module &#183; runs entirely in your browser</p>
+  </header>
+
+  <div class="layout">
+    <div>
+      <label class="drop" id="drop" tabindex="0">
+        <span id="dropIdle"><strong>Drop an SVG here</strong><br>or click to browse</span>
+        <span class="file" id="dropFile" hidden></span>
+        <input type="file" id="fileInput" accept=".svg,image/svg+xml" hidden>
+      </label>
+      <p class="hint">Any SVG works — paths, shapes and transforms are flattened in the browser.
+        vpype-optimized files (linemerge/linesort) plot fastest.</p>
+
+      <fieldset>
+        <legend class="microlabel">Paper</legend>
+        <div class="row">
+          <div class="field">
+            <label for="paper">Size</label>
+            <select id="paper">
+              <option value="a5" selected>A5 landscape — 210 × 148</option>
+              <option value="a4cut">Cut A4 — 210 × 200</option>
+              <option value="a4">A4 portrait — 210 × 297 (partly unreachable)</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" id="customPaper" hidden>
+          <div class="field"><label for="pw">Width mm</label><input type="number" id="pw" value="210" min="10" step="1"></div>
+          <div class="field"><label for="ph">Height mm</label><input type="number" id="ph" value="148" min="10" step="1"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="margin">Drawing margin mm</label><input type="number" id="margin" value="5" min="0" step="1"></div>
+          <div class="field" style="display:flex;align-items:end">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink)">
+              <input type="checkbox" id="upscale"> Scale up to fit
+            </label>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend class="microlabel">Pen</legend>
+        <div class="row">
+          <div class="field"><label for="zdraw">Z draw mm</label><input type="number" id="zdraw" value="17.1" step="0.1"></div>
+          <div class="field"><label for="zhop">Z hop mm</label><input type="number" id="zhop" value="3" min="0.5" step="0.5"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="pendx">Pen offset X mm</label><input type="number" id="pendx" value="-29" step="0.5"></div>
+          <div class="field"><label for="pendy">Pen offset Y mm</label><input type="number" id="pendy" value="-41" step="0.5"></div>
+        </div>
+        <p class="hint">Offsets are assumed from the jig margins — verify once with the calibration cross.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend class="microlabel">Speeds mm/s</legend>
+        <div class="row">
+          <div class="field"><label for="fdraw">Draw</label><input type="number" id="fdraw" value="150" min="1" step="10"></div>
+          <div class="field"><label for="ftravel">Travel</label><input type="number" id="ftravel" value="200" min="1" step="10"></div>
+          <div class="field"><label for="fz">Z</label><input type="number" id="fz" value="15" min="1" step="1"></div>
+        </div>
+        <p class="hint">Stabilo fineliners take 300–400. Wet ink (fountain pens): go slow.</p>
+      </fieldset>
+
+      <div class="actions">
+        <button class="primary" id="download" disabled>Download G-code</button>
+        <button id="calibrate">Calibration cross</button>
+        <button id="replay" hidden>Replay plot</button>
+      </div>
+
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <div>
+      <div class="bedwrap" aria-label="Preview of the printer bed with paper and toolpath">
+        <svg id="bed" viewBox="-6 -6 268 280" role="img"></svg>
+      </div>
+      <div class="titleblock" id="titleblock">
+        <div class="tb"><div class="microlabel">File</div><div class="v" id="tbFile">—</div></div>
+        <div class="tb"><div class="microlabel">Drawing</div><div class="v" id="tbSize">—</div></div>
+        <div class="tb"><div class="microlabel">Scale</div><div class="v" id="tbScale">—</div></div>
+        <div class="tb"><div class="microlabel">Paths</div><div class="v" id="tbPaths">—</div></div>
+        <div class="tb"><div class="microlabel">Ink / travel</div><div class="v" id="tbLen">—</div></div>
+        <div class="tb"><div class="microlabel">Est. time</div><div class="v" id="tbTime">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Workflow: file homes WITHOUT pen &#8594; pauses (M400 U1) &#8594; mount pen &#8594; resume. Stay at the machine.</span>
+    <a href="https://github.com/mhellevang/strek">github.com/mhellevang/strek</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ============ machine constants (mirror scripts/svg2gcode.py) ============ */
+const BED = 256;
+const X_MIN = 48, X_MAX = 255;        // legal NOZZLE window — outside the
+const Y_MIN = 55, Y_MAX = 255;        // UMTS excluded area + edge margin
+const Z_FLOOR = 16.0;                 // hard lower bound for Z draw
+const PAPER_RIGHT = BED - 29;         // paper right edge (jig margin)
+const PAPER_BACK = BED - 41;          // paper back edge (jig margin)
+const PX_TO_MM = 25.4 / 96;
+
+const $ = id => document.getElementById(id);
+
+/* ============ state ============ */
+let source = null;   // {kind:'svg', name, paths: [[x,y]...] in mm, y-down}
+                     // or {kind:'cal'}
+let result = null;   // computed placement + gcode, or null when invalid
+
+/* ============ params ============ */
+function params() {
+  const sel = $("paper").value;
+  const papers = { a4: [210, 297], a5: [210, 148], a4cut: [210, 200] };
+  const paper = sel === "custom"
+    ? [Number($("pw").value) || 210, Number($("ph").value) || 148]
+    : papers[sel];
+  return {
+    paper,
+    margin: Math.max(0, Number($("margin").value) || 0),
+    upscale: $("upscale").checked,
+    zDraw: Number($("zdraw").value),
+    zHop: Number($("zhop").value),
+    penDx: Number($("pendx").value),
+    penDy: Number($("pendy").value),
+    vDraw: Number($("fdraw").value),
+    vTravel: Number($("ftravel").value),
+    vZ: Number($("fz").value),
+  };
+}
+
+/* ============ SVG parsing: flatten everything to polylines in mm ============ */
+async function parseSvg(text) {
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  if (doc.querySelector("parsererror")) throw new Error("Not a valid SVG file.");
+  const svg = doc.documentElement;
+
+  // mm per user unit, from width + viewBox (vpype: width in cm, viewBox in px)
+  let scale = PX_TO_MM;
+  const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+  const widthMm = parseLength(svg.getAttribute("width"));
+  if (vb.length === 4 && vb[2] > 0 && widthMm) scale = widthMm / vb[2];
+
+  // Mount hidden at natural user-unit size so getCTM() only reflects transforms
+  const holder = document.createElement("div");
+  holder.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden";
+  const live = svg.cloneNode(true);
+  if (vb.length === 4) { live.setAttribute("width", vb[2]); live.setAttribute("height", vb[3]); }
+  holder.appendChild(live);
+  document.body.appendChild(holder);
+
+  const paths = [];
+  try {
+    for (const el of live.querySelectorAll("polygon,polyline,line,path,circle,ellipse,rect")) {
+      if (el.closest("defs,clipPath,mask,pattern,symbol")) continue;
+      const ctm = el.getCTM();
+      const pt = (x, y) => {
+        const p = new DOMPoint(x, y).matrixTransform(ctm);
+        return [p.x * scale, p.y * scale];
+      };
+      const tag = el.tagName.toLowerCase();
+      if (tag === "polygon" || tag === "polyline") {
+        const nums = (el.getAttribute("points") || "").replace(/,/g, " ").trim().split(/\s+/).map(Number);
+        const pts = [];
+        for (let i = 0; i + 1 < nums.length; i += 2) pts.push(pt(nums[i], nums[i + 1]));
+        if (tag === "polygon" && pts.length > 1) pts.push(pts[0]);
+        if (pts.length > 1) paths.push(pts);
+      } else if (tag === "line") {
+        paths.push([pt(+el.getAttribute("x1"), +el.getAttribute("y1")),
+                    pt(+el.getAttribute("x2"), +el.getAttribute("y2"))]);
+      } else {
+        // path / circle / ellipse / rect: sample along the geometry
+        const total = el.getTotalLength ? el.getTotalLength() : 0;
+        if (!total) continue;
+        const stepUser = Math.max(0.25 / scale, total / 20000); // ~0.25 mm, capped
+        let prev = null, cur = [];
+        for (let d = 0; d <= total + 1e-9; d += stepUser) {
+          const p = el.getPointAtLength(Math.min(d, total));
+          const q = pt(p.x, p.y);
+          // discontinuity = jump between subpaths (invisible M move)
+          if (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) > 6 * stepUser * scale) {
+            if (cur.length > 1) paths.push(simplify(cur, 0.05));
+            cur = [];
+          }
+          cur.push(q); prev = q;
+        }
+        if (cur.length > 1) paths.push(simplify(cur, 0.05));
+      }
+    }
+  } finally {
+    holder.remove();
+  }
+  if (!paths.length) throw new Error("No strokes found in the SVG.");
+  return paths;
+}
+
+function parseLength(s) {
+  if (!s) return null;
+  const m = String(s).trim().match(/^([\d.]+)\s*(cm|mm|in|px)?$/);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  return v * ({ cm: 10, mm: 1, in: 25.4, px: PX_TO_MM }[m[2]] ?? PX_TO_MM);
+}
+
+/* Ramer–Douglas–Peucker, tolerance in mm */
+function simplify(pts, tol) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const [ax, ay] = pts[a], [bx, by] = pts[b];
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    let maxD = 0, maxI = -1;
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = pts[i];
+      let d;
+      if (len2 === 0) d = Math.hypot(px - ax, py - ay);
+      else {
+        const t = ((px - ax) * dx + (py - ay) * dy) / len2;
+        const cx = ax + Math.max(0, Math.min(1, t)) * dx;
+        const cy = ay + Math.max(0, Math.min(1, t)) * dy;
+        d = Math.hypot(px - cx, py - cy);
+      }
+      if (d > maxD) { maxD = d; maxI = i; }
+    }
+    if (maxD > tol) { keep[maxI] = 1; stack.push([a, maxI], [maxI, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+/* ============ placement (mirror of transform() in svg2gcode.py) ============ */
+const clamp = (v, lo, hi) => lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi);
+
+function place(pathsMm, p) {
+  const warnings = [];
+  const [pw, ph] = p.paper;
+  const px0 = PAPER_RIGHT - pw, px1 = PAPER_RIGHT;
+  const py0 = PAPER_BACK - ph, py1 = PAPER_BACK;
+  const wx0 = X_MIN + p.penDx, wx1 = X_MAX + p.penDx;
+  const wy0 = Y_MIN + p.penDy, wy1 = Y_MAX + p.penDy;
+  const ux0 = Math.max(px0, wx0) + p.margin, ux1 = Math.min(px1, wx1) - p.margin;
+  const uy0 = Math.max(py0, wy0) + p.margin, uy1 = Math.min(py1, wy1) - p.margin;
+  if (ux1 <= ux0 || uy1 <= uy0)
+    return { error: "Drawable area is empty — check paper size, margin and pen offsets." };
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const path of pathsMm) for (const [x, y] of path) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const w = maxX - minX, h = maxY - minY;
+  const fit = Math.min(w ? (ux1 - ux0) / w : 1, h ? (uy1 - uy0) / h : 1);
+  const s = p.upscale ? fit : Math.min(1, fit);
+  if (fit < 1)
+    warnings.push(`Design (${w.toFixed(0)}×${h.toFixed(0)} mm) exceeds the drawable area — scaled down to ${(fit * 100).toFixed(0)} %.`);
+
+  const outW = w * s, outH = h * s;
+  const cx = clamp((px0 + px1) / 2, ux0 + outW / 2, ux1 - outW / 2);
+  const cy = clamp((py0 + py1) / 2, uy0 + outH / 2, uy1 - outH / 2);
+  if (Math.abs(cx - (px0 + px1) / 2) > 0.5 || Math.abs(cy - (py0 + py1) / 2) > 0.5)
+    warnings.push("Drawing can't sit at the paper's center (pen can't reach) — shifted to where the pen reaches.");
+
+  const x0 = cx - outW / 2, y0 = cy - outH / 2;
+  const penPaths = pathsMm.map(path =>
+    path.map(([x, y]) => [x0 + (x - minX) * s, y0 + (maxY - y) * s])); // flip Y
+  const margins = [py1 - (cy + outH / 2), (cy - outH / 2) - py0,
+                   (cx - outW / 2) - px0, px1 - (cx + outW / 2)];
+  return { penPaths, w: outW, h: outH, scale: s, fit, margins, warnings,
+           paperRect: [px0, px1, py0, py1], window: [ux0, ux1, uy0, uy1] };
+}
+
+function calibrationPaths(p) {
+  const [pw, ph] = p.paper;
+  const px0 = PAPER_RIGHT - pw, px1 = PAPER_RIGHT;
+  const py0 = PAPER_BACK - ph, py1 = PAPER_BACK;
+  const wx0 = X_MIN + p.penDx, wx1 = X_MAX + p.penDx;
+  const wy0 = Y_MIN + p.penDy, wy1 = Y_MAX + p.penDy;
+  const arm = 20;
+  const cx = clamp((px0 + px1) / 2, wx0 + arm + 5, wx1 - arm - 5);
+  const cy = clamp((py0 + py1) / 2, wy0 + arm + 5, wy1 - arm - 5);
+  const penPaths = [
+    [[cx - arm, cy], [cx + arm, cy]],
+    [[cx, cy - arm], [cx, cy + arm]],
+    [[cx - 5, cy + arm - 5], [cx, cy + arm], [cx + 5, cy + arm - 5]], // arrow → back wall
+  ];
+  const warnings = [];
+  if (Math.abs(cx - (px0 + px1) / 2) > 0.5 || Math.abs(cy - (py0 + py1) / 2) > 0.5)
+    warnings.push("Paper center is out of pen reach — cross shifted; measure against its expected position, not the center.");
+  return { penPaths, w: arm * 2, h: arm * 2, scale: 1, fit: 1, margins: null, warnings,
+           paperRect: [px0, px1, py0, py1], window: null };
+}
+
+/* ============ G-code (mirror of generate() in svg2gcode.py) ============ */
+function toNozzle(penPaths, p) {
+  return penPaths.map(path => path.map(([x, y]) => [x - p.penDx, y - p.penDy]));
+}
+
+function checkBounds(nozzlePaths) {
+  for (const path of nozzlePaths) for (const [x, y] of path)
+    if (x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX)
+      return `SAFETY STOP: nozzle point (${x.toFixed(1)}, ${y.toFixed(1)}) outside legal window X[${X_MIN},${X_MAX}] Y[${Y_MIN},${Y_MAX}].`;
+  return null;
+}
+
+function gcode(nozzlePaths, p, srcName) {
+  const zUp = p.zDraw + p.zHop;
+  const fDraw = Math.round(p.vDraw * 60), fTravel = Math.round(p.vTravel * 60), fZ = Math.round(p.vZ * 60);
+  const park = [152, 70];
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+  // per-path time cost first, so M73 progress is time-weighted
+  const costs = [];
+  let pos = park;
+  for (const path of nozzlePaths) {
+    let draw = 0;
+    for (let i = 1; i < path.length; i++) draw += dist(path[i - 1], path[i]);
+    costs.push(dist(pos, path[0]) / p.vTravel + draw / p.vDraw + 2 * p.zHop / p.vZ);
+    pos = path[path.length - 1];
+  }
+  const total = costs.reduce((a, b) => a + b, 0) || 1;
+
+  const L = [
+    `; Plotter G-code generated by strek — ${srcName}`,
+    `; z_draw=${p.zDraw} z_hop=${p.zHop} draw=${p.vDraw}mm/s travel=${p.vTravel}mm/s`,
+    `; pen_dx=${p.penDx} pen_dy=${p.penDy} paper=${p.paper[0]}x${p.paper[1]}`,
+    "; NO heating, NO extrusion. Homes WITHOUT pen, pauses for pen mounting.",
+    ";",
+    "G21 ; millimeters",
+    "G90 ; absolute coordinates",
+    "M104 S0 ; hotend heater OFF",
+    "M140 S0 ; bed heater OFF",
+    "M106 S0 ; part fan off",
+    "M106 P2 S0 ; aux fan off",
+    "M106 P3 S0 ; chamber fan off",
+    "G28 ; home all axes — PEN MUST NOT BE MOUNTED YET",
+    `G0 Z${(zUp + 30).toFixed(1)} F${fZ}`,
+    `G0 X${park[0]} Y${park[1]} F${fTravel} ; park near the front`,
+    "M400 U1 ; PAUSE: mount the pen, press resume",
+    "M73 P0",
+    `G0 Z${zUp.toFixed(1)} F${fZ}`,
+  ];
+
+  let drawLen = 0, travelLen = 0, elapsed = 0, pct = 0;
+  pos = park;
+  nozzlePaths.forEach((path, i) => {
+    travelLen += dist(pos, path[0]);
+    L.push(`G0 X${path[0][0].toFixed(3)} Y${path[0][1].toFixed(3)} F${fTravel}`);
+    L.push(`G1 Z${p.zDraw.toFixed(1)} F${fZ}`);
+    for (let j = 1; j < path.length; j++) {
+      L.push(`G1 X${path[j][0].toFixed(3)} Y${path[j][1].toFixed(3)} F${fDraw}`);
+      drawLen += dist(path[j - 1], path[j]);
+    }
+    L.push(`G0 Z${zUp.toFixed(1)} F${fZ}`);
+    pos = path[path.length - 1];
+    elapsed += costs[i];
+    const np = Math.min(99, Math.floor(100 * elapsed / total));
+    if (np > pct) { pct = np; L.push(`M73 P${pct}`); }
+  });
+
+  L.push(
+    `G0 Z${(zUp + 30).toFixed(1)} F${fZ}`,
+    `G0 X${park[0]} Y240 F${fTravel} ; head to the back — remove sheet/pen`,
+    "M400",
+    "M73 P100",
+    "; done", "");
+  return { text: L.join("\n"), drawLen, travelLen, seconds: total };
+}
+
+/* ============ validation ============ */
+function validate(p) {
+  const stops = [], warns = [];
+  if (!(p.zDraw >= Z_FLOOR))
+    stops.push(`Z draw ${p.zDraw} is below the ${Z_FLOOR} mm floor — the pen module needs ~17 mm clearance.`);
+  else if (p.zDraw < 17)
+    warns.push(`Z draw ${p.zDraw} is below 17.0 — heavy pen pressure. The spring absorbs it, but make sure it's intended.`);
+  if (!(p.zHop > 0)) stops.push("Z hop must be > 0 — otherwise the pen drags between paths.");
+  if (!(p.vDraw > 0 && p.vTravel > 0 && p.vZ > 0)) stops.push("Speeds must be > 0.");
+  if (!(p.paper[0] > 0 && p.paper[1] > 0)) stops.push("Paper size must be positive.");
+  return { stops, warns };
+}
+
+/* ============ preview ============ */
+const NS = "http://www.w3.org/2000/svg";
+const flipY = y => BED - y; // bed Y (0=front) → screen Y (front at bottom)
+
+function el(name, attrs) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function renderPreview(res) {
+  const svg = $("bed");
+  svg.textContent = "";
+
+  const defs = el("defs", {});
+  defs.innerHTML =
+    `<pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6">
+       <path d="M0 6 L6 0" stroke="#C63A2F" stroke-width="0.5" opacity="0.45"/>
+     </pattern>
+     <pattern id="mmgrid" patternUnits="userSpaceOnUse" width="10" height="10">
+       <path d="M10 0 H0 V10" fill="none" stroke="#E7EBF0" stroke-width="0.4"/>
+     </pattern>`;
+  svg.appendChild(defs);
+
+  // bed + grid
+  svg.appendChild(el("rect", { x: 0, y: 0, width: BED, height: BED, fill: "#FDFDFB", stroke: "#1C2740", "stroke-width": 0.8 }));
+  svg.appendChild(el("rect", { x: 0, y: 0, width: BED, height: BED, fill: "url(#mmgrid)" }));
+
+  // excluded area (nozzle keep-out): front strip y<55 + left column x<48
+  const ex = [[0, 0], [BED, 0], [BED, 55], [48, 55], [48, BED], [0, BED]];
+  const exPts = ex.map(([x, y]) => `${x},${flipY(y)}`).join(" ");
+  svg.appendChild(el("polygon", { points: exPts, fill: "url(#hatch)", stroke: "#C63A2F", "stroke-width": 0.6, "stroke-dasharray": "3 2" }));
+
+  if (res && res.paperRect) {
+    const [px0, px1, py0, py1] = res.paperRect;
+    // jig arms along back + right paper edges
+    svg.appendChild(el("rect", { x: px0 - 3, y: flipY(py1) - 8, width: px1 - px0 + 14, height: 8, fill: "#E3E6EC" }));
+    svg.appendChild(el("rect", { x: px1, y: flipY(py1) - 8, width: 11, height: py1 - py0 + 8, fill: "#E3E6EC" }));
+    // paper: unreachable tint below, reachable white on top
+    svg.appendChild(el("rect", { x: px0, y: flipY(py1), width: px1 - px0, height: py1 - py0, fill: "#EFEFE9", stroke: "#1C2740", "stroke-width": 0.5 }));
+    if (res.window) {
+      const [ux0, ux1, uy0, uy1] = res.window;
+      const ix0 = Math.max(px0, ux0), ix1 = Math.min(px1, ux1);
+      const iy0 = Math.max(py0, uy0), iy1 = Math.min(py1, uy1);
+      if (ix1 > ix0 && iy1 > iy0)
+        svg.appendChild(el("rect", { x: ix0, y: flipY(iy1), width: ix1 - ix0, height: iy1 - iy0, fill: "#FFFFFF" }));
+    } else {
+      svg.appendChild(el("rect", { x: px0, y: flipY(py1), width: px1 - px0, height: py1 - py0, fill: "#FFFFFF" }));
+    }
+  }
+
+  if (res && res.penPaths) {
+    // travel moves: faint dashed
+    let d = "", prev = null;
+    for (const path of res.penPaths) {
+      if (prev) d += `M${prev[0].toFixed(2)} ${flipY(prev[1]).toFixed(2)} L${path[0][0].toFixed(2)} ${flipY(path[0][1]).toFixed(2)}`;
+      prev = path[path.length - 1];
+    }
+    if (d) svg.appendChild(el("path", { d, fill: "none", stroke: "#B7C0CE", "stroke-width": 0.3, "stroke-dasharray": "1.4 1.8" }));
+
+    // ink strokes, animated draw-in
+    let ink = "";
+    for (const path of res.penPaths) {
+      ink += `M${path[0][0].toFixed(2)} ${flipY(path[0][1]).toFixed(2)}`;
+      for (let i = 1; i < path.length; i++) ink += `L${path[i][0].toFixed(2)} ${flipY(path[i][1]).toFixed(2)}`;
+    }
+    const inkPath = el("path", { d: ink, fill: "none", stroke: "#2B50C8", "stroke-width": 0.45, "stroke-linecap": "round", "stroke-linejoin": "round" });
+    svg.appendChild(inkPath);
+    animatePlot(inkPath);
+    $("replay").hidden = false;
+  } else {
+    $("replay").hidden = true;
+  }
+
+  // front label
+  const label = el("text", { x: BED / 2, y: BED + 11, "text-anchor": "middle",
+    "font-family": "ui-monospace, Menlo, monospace", "font-size": "6", fill: "#5B6675", "letter-spacing": "2" });
+  label.textContent = "FRONT (DOOR)";
+  svg.appendChild(label);
+}
+
+function animatePlot(pathEl) {
+  const len = pathEl.getTotalLength();
+  pathEl.style.strokeDasharray = len;
+  pathEl.style.strokeDashoffset = len;
+  pathEl.classList.add("plotanim");
+}
+
+/* ============ orchestration ============ */
+function refresh() {
+  const p = params();
+  const { stops, warns } = validate(p);
+  const messages = [];
+  result = null;
+
+  let res = null;
+  if (!stops.length && source) {
+    res = source.kind === "cal" ? calibrationPaths(p) : place(source.paths, p);
+    if (res.error) { stops.push(res.error); res = null; }
+  }
+  if (res) {
+    warns.push(...res.warnings);
+    const nozzle = toNozzle(res.penPaths, p);
+    const boundErr = checkBounds(nozzle);
+    if (boundErr) { stops.push(boundErr); res = null; }
+    else {
+      const name = source.kind === "cal" ? "calibration cross" : source.name;
+      const g = gcode(nozzle, p, name);
+      result = { ...res, ...g, name };
+    }
+  }
+
+  // with no file loaded (or a hard stop), still show bed + paper placement
+  let previewRes = res;
+  if (!previewRes) {
+    const [pw, ph] = p.paper;
+    previewRes = (pw > 0 && ph > 0)
+      ? { paperRect: [PAPER_RIGHT - pw, PAPER_RIGHT, PAPER_BACK - ph, PAPER_BACK], window: null }
+      : null;
+  }
+  renderPreview(previewRes);
+  renderTitleblock(result, p);
+  $("messages").innerHTML =
+    stops.map(m => `<div class="msg stop">${esc(m)}</div>`).join("") +
+    warns.map(m => `<div class="msg warn">${esc(m)}</div>`).join("");
+  $("download").disabled = !result;
+}
+
+function renderTitleblock(r, p) {
+  $("tbFile").textContent = r ? r.name : "—";
+  $("tbSize").textContent = r ? `${r.w.toFixed(0)}×${r.h.toFixed(0)} on ${p.paper[0]}×${p.paper[1]}` : "—";
+  $("tbScale").textContent = r ? (r.scale === 1 ? "1:1" : `${(r.scale * 100).toFixed(0)} %`) : "—";
+  $("tbPaths").textContent = r ? r.penPaths.length : "—";
+  $("tbLen").textContent = r ? `${(r.drawLen / 1000).toFixed(1)} / ${(r.travelLen / 1000).toFixed(1)} m` : "—";
+  $("tbTime").textContent = r ? `~${Math.max(1, Math.round(r.seconds / 60))} min +` : "—";
+}
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ============ events ============ */
+async function loadFile(file) {
+  try {
+    const paths = await parseSvg(await file.text());
+    source = { kind: "svg", name: file.name, paths };
+    $("dropIdle").hidden = true;
+    $("dropFile").hidden = false;
+    $("dropFile").textContent = file.name;
+  } catch (e) {
+    source = null;
+    $("dropIdle").hidden = false;
+    $("dropFile").hidden = true;
+    $("messages").innerHTML = `<div class="msg stop">${esc(e.message)}</div>`;
+  }
+  refresh();
+}
+
+$("fileInput").addEventListener("change", e => e.target.files[0] && loadFile(e.target.files[0]));
+const drop = $("drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("armed"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("armed"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("armed");
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } });
+
+$("calibrate").addEventListener("click", () => {
+  source = { kind: "cal" };
+  $("dropIdle").hidden = false;
+  $("dropFile").hidden = true;
+  refresh();
+});
+
+$("download").addEventListener("click", () => {
+  if (!result) return;
+  const base = source.kind === "cal" ? "calibration-cross"
+    : source.name.replace(/\.svg$/i, "");
+  const blob = new Blob([result.text], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${base}.gcode`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("replay").addEventListener("click", refresh);
+$("paper").addEventListener("change", () => { $("customPaper").hidden = $("paper").value !== "custom"; refresh(); });
+for (const id of ["pw", "ph", "margin", "upscale", "zdraw", "zhop", "pendx", "pendy", "fdraw", "ftravel", "fz"])
+  $(id).addEventListener("input", refresh);
+
+refresh();
+</script>
+</body>
+</html>
