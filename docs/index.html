@@ -231,6 +231,7 @@
 
       <div class="actions">
         <button class="primary" id="download" disabled>Download G-code</button>
+        <button id="rotate" disabled>Rotate 90&#176;</button>
         <button id="calibrate">Calibration cross</button>
         <button id="replay" hidden>Replay plot</button>
       </div>
@@ -277,6 +278,7 @@ const $ = id => document.getElementById(id);
 let source = null;   // {kind:'svg', name, paths: [[x,y]...] in mm, y-down}
                      // or {kind:'cal'}
 let result = null;   // computed placement + gcode, or null when invalid
+let rotation = 0;    // 0/90/180/270 — applied to the design before placement
 
 /* ============ params ============ */
 function params() {
@@ -402,6 +404,18 @@ function simplify(pts, tol) {
 
 /* ============ placement (mirror of transform() in svg2gcode.py) ============ */
 const clamp = (v, lo, hi) => lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi);
+
+// Rotate the design in SVG space. Placement re-centers via the bounding
+// box afterwards, so rotating about the origin is enough.
+function rotatePaths(paths, deg) {
+  if (!deg) return paths;
+  const map = {
+    90:  ([x, y]) => [-y, x],
+    180: ([x, y]) => [-x, -y],
+    270: ([x, y]) => [y, -x],
+  }[deg];
+  return paths.map(path => path.map(map));
+}
 
 function place(pathsMm, p) {
   const warnings = [];
@@ -648,7 +662,8 @@ function refresh() {
 
   let res = null;
   if (!stops.length && source) {
-    res = source.kind === "cal" ? calibrationPaths(p) : place(source.paths, p);
+    res = source.kind === "cal" ? calibrationPaths(p)
+                                : place(rotatePaths(source.paths, rotation), p);
     if (res.error) { stops.push(res.error); res = null; }
   }
   if (res) {
@@ -677,6 +692,8 @@ function refresh() {
     stops.map(m => `<div class="msg stop">${esc(m)}</div>`).join("") +
     warns.map(m => `<div class="msg warn">${esc(m)}</div>`).join("");
   $("download").disabled = !result;
+  $("rotate").disabled = !(source && source.kind === "svg");
+  $("rotate").innerHTML = `Rotate 90&deg;${rotation ? ` (${rotation}&deg;)` : ""}`;
 }
 
 function renderTitleblock(r, p) {
@@ -695,6 +712,7 @@ async function loadFile(file) {
   try {
     const paths = await parseSvg(await file.text());
     source = { kind: "svg", name: file.name, paths };
+    rotation = 0;
     $("dropIdle").hidden = true;
     $("dropFile").hidden = false;
     $("dropFile").textContent = file.name;
@@ -736,6 +754,7 @@ $("download").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+$("rotate").addEventListener("click", () => { rotation = (rotation + 90) % 360; refresh(); });
 $("replay").addEventListener("click", refresh);
 $("paper").addEventListener("change", () => { $("customPaper").hidden = $("paper").value !== "custom"; refresh(); });
 for (const id of ["pw", "ph", "margin", "upscale", "zdraw", "zhop", "pendx", "pendy", "fdraw", "ftravel", "fz"])
