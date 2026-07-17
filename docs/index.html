@@ -178,6 +178,7 @@
       </label>
       <p class="hint">Any SVG works — paths, shapes and transforms are flattened in the browser.
         vpype-optimized files (linemerge/linesort) plot fastest.</p>
+      <p class="hint" id="progress" role="status" aria-live="polite" hidden></p>
 
       <fieldset>
         <legend class="microlabel">Paper</legend>
@@ -302,7 +303,7 @@ function params() {
 }
 
 /* ============ SVG parsing: flatten everything to polylines in mm ============ */
-async function parseSvg(text) {
+async function parseSvg(text, onProgress) {
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   if (doc.querySelector("parsererror")) throw new Error("Not a valid SVG file.");
   const svg = doc.documentElement;
@@ -322,9 +323,39 @@ async function parseSvg(text) {
   document.body.appendChild(holder);
 
   const paths = [];
+  const yieldEvery = async (ei, frac) => {
+    // Yield to the event loop periodically so the UI stays responsive and the
+    // progress bar paints while a big file is parsed on the main thread
+    // (getPointAtLength needs the DOM, so a Worker isn't an option).
+    if (onProgress && (ei & 511) === 0) { onProgress(frac); await new Promise(r => setTimeout(r)); }
+  };
   try {
-    for (const el of live.querySelectorAll("polygon,polyline,line,path,circle,ellipse,rect")) {
-      if (el.closest("defs,clipPath,mask,pattern,symbol")) continue;
+    const els = [...live.querySelectorAll("polygon,polyline,line,path,circle,ellipse,rect")]
+      .filter(el => !el.closest("defs,clipPath,mask,pattern,symbol"));
+
+    // getPointAtLength is a slow synchronous DOM call (tens of µs each), so a
+    // fixed per-element resolution lets a huge SVG pin the main thread for
+    // minutes. Instead, measure the total curve length up front and pick ONE
+    // global sample step that bounds the total number of samples — small files
+    // keep the fine 0.25 mm resolution, huge ones just plot a bit coarser
+    // rather than hanging or being rejected.
+    const SAMPLE_TARGET = 150000;
+    const minStepUser = 0.25 / scale; // ~0.25 mm floor
+    const curveLen = new Map();
+    let totalLen = 0;
+    for (let ei = 0; ei < els.length; ei++) {
+      const el = els[ei];
+      const tag = el.tagName.toLowerCase();
+      if (tag === "polygon" || tag === "polyline" || tag === "line") continue;
+      await yieldEvery(ei, 0.5 * ei / els.length); // measuring = first half of the bar
+      const L = el.getTotalLength ? el.getTotalLength() : 0;
+      if (L) { curveLen.set(el, L); totalLen += L; }
+    }
+    const stepUser = totalLen > 0 ? Math.max(minStepUser, totalLen / SAMPLE_TARGET) : minStepUser;
+
+    for (let ei = 0; ei < els.length; ei++) {
+      const el = els[ei];
+      await yieldEvery(ei, 0.5 + 0.5 * ei / els.length); // sampling = second half
       const ctm = el.getCTM();
       const pt = (x, y) => {
         const p = new DOMPoint(x, y).matrixTransform(ctm);
@@ -336,15 +367,14 @@ async function parseSvg(text) {
         const pts = [];
         for (let i = 0; i + 1 < nums.length; i += 2) pts.push(pt(nums[i], nums[i + 1]));
         if (tag === "polygon" && pts.length > 1) pts.push(pts[0]);
-        if (pts.length > 1) paths.push(pts);
+        if (pts.length > 1) paths.push(simplify(pts, 0.02)); // drop collinear runs in dense polylines
       } else if (tag === "line") {
         paths.push([pt(+el.getAttribute("x1"), +el.getAttribute("y1")),
                     pt(+el.getAttribute("x2"), +el.getAttribute("y2"))]);
       } else {
         // path / circle / ellipse / rect: sample along the geometry
-        const total = el.getTotalLength ? el.getTotalLength() : 0;
+        const total = curveLen.get(el);
         if (!total) continue;
-        const stepUser = Math.max(0.25 / scale, total / 20000); // ~0.25 mm, capped
         let prev = null, cur = [];
         for (let d = 0; d <= total + 1e-9; d += stepUser) {
           const p = el.getPointAtLength(Math.min(d, total));
@@ -486,6 +516,23 @@ function checkBounds(nozzlePaths) {
     if (x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX)
       return `SAFETY STOP: nozzle point (${x.toFixed(1)}, ${y.toFixed(1)}) outside legal window X[${X_MIN},${X_MAX}] Y[${Y_MIN},${Y_MAX}].`;
   return null;
+}
+
+// Cheap path metrics (ink/travel length + time estimate) without building the
+// full G-code text — refresh() needs these every keystroke, the text only on
+// download.
+function metrics(nozzlePaths, p) {
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let drawLen = 0, travelLen = 0, seconds = 0, pos = [152, 70]; // park
+  for (const path of nozzlePaths) {
+    travelLen += dist(pos, path[0]);
+    let draw = 0;
+    for (let i = 1; i < path.length; i++) draw += dist(path[i - 1], path[i]);
+    drawLen += draw;
+    seconds += dist(pos, path[0]) / p.vTravel + draw / p.vDraw + 2 * p.zHop / p.vZ;
+    pos = path[path.length - 1];
+  }
+  return { drawLen, travelLen, seconds };
 }
 
 function gcode(nozzlePaths, p, srcName) {
@@ -633,8 +680,13 @@ function renderPreview(res) {
     }
     const inkPath = el("path", { d: ink, fill: "none", stroke: "#2B50C8", "stroke-width": 0.45, "stroke-linecap": "round", "stroke-linejoin": "round" });
     svg.appendChild(inkPath);
-    animatePlot(inkPath);
-    $("replay").hidden = false;
+    // animatePlot calls getTotalLength on the whole path — expensive on big
+    // designs. Skip it (and the replay button) past a point threshold.
+    let nPts = 0;
+    for (const path of res.penPaths) nPts += path.length;
+    const canAnimate = nPts <= 20000;
+    if (canAnimate) animatePlot(inkPath);
+    $("replay").hidden = !canAnimate;
   } else {
     $("replay").hidden = true;
   }
@@ -673,8 +725,8 @@ function refresh() {
     if (boundErr) { stops.push(boundErr); res = null; }
     else {
       const name = source.kind === "cal" ? "calibration cross" : source.name;
-      const g = gcode(nozzle, p, name);
-      result = { ...res, ...g, name };
+      // Store nozzle paths + params; build the G-code text lazily on download.
+      result = { ...res, ...metrics(nozzle, p), name, nozzle, p };
     }
   }
 
@@ -708,9 +760,17 @@ function renderTitleblock(r, p) {
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 /* ============ events ============ */
+const setProgress = msg => {
+  const el = $("progress");
+  el.hidden = !msg;
+  if (msg) el.textContent = msg;
+};
+
 async function loadFile(file) {
   try {
-    const paths = await parseSvg(await file.text());
+    setProgress("Reading file…");
+    const text = await file.text();
+    const paths = await parseSvg(text, frac => setProgress(`Parsing… ${Math.round(frac * 100)}%`));
     source = { kind: "svg", name: file.name, paths };
     rotation = 0;
     $("dropIdle").hidden = true;
@@ -720,8 +780,12 @@ async function loadFile(file) {
     source = null;
     $("dropIdle").hidden = false;
     $("dropFile").hidden = true;
+    setProgress(null);
+    refresh(); // rebuilds #messages from empty state — must run before we show the error
     $("messages").innerHTML = `<div class="msg stop">${esc(e.message)}</div>`;
+    return;
   }
+  setProgress(null);
   refresh();
 }
 
@@ -746,7 +810,8 @@ $("download").addEventListener("click", () => {
   if (!result) return;
   const base = source.kind === "cal" ? "calibration-cross"
     : source.name.replace(/\.svg$/i, "");
-  const blob = new Blob([result.text], { type: "text/plain" });
+  const { text } = gcode(result.nozzle, result.p, result.name);
+  const blob = new Blob([text], { type: "text/plain" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `${base}.gcode`;
@@ -757,8 +822,15 @@ $("download").addEventListener("click", () => {
 $("rotate").addEventListener("click", () => { rotation = (rotation + 90) % 360; refresh(); });
 $("replay").addEventListener("click", refresh);
 $("paper").addEventListener("change", () => { $("customPaper").hidden = $("paper").value !== "custom"; refresh(); });
+// Debounce input events: each refresh re-runs placement + full G-code build +
+// preview render, too heavy to fire on every keystroke of a big design.
+let refreshTimer = null;
+function debouncedRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refresh, 150);
+}
 for (const id of ["pw", "ph", "margin", "upscale", "zdraw", "zhop", "pendx", "pendy", "fdraw", "ftravel", "fz"])
-  $(id).addEventListener("input", refresh);
+  $(id).addEventListener("input", debouncedRefresh);
 
 refresh();
 </script>
