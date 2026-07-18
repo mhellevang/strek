@@ -99,6 +99,26 @@
   .drop.armed { border-color: var(--blue); color: var(--blue); }
   .drop .file { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-all; }
 
+  .layers-list { display: grid; gap: 4px; margin-top: 8px; }
+  .lyr { display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--sheet); padding: 5px 7px; font-family: var(--mono); font-size: 12.5px; }
+  .lyr .sw { width: 11px; height: 11px; flex: none; border: 1px solid rgba(0,0,0,.25); }
+  .lyr .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .lyr .pen { flex: none; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .lyr .lbtn { flex: none; border: none; background: none; padding: 2px 4px; font-size: 13px; line-height: 1; color: var(--muted); cursor: pointer; }
+  .lyr .lbtn:hover:not(:disabled) { color: var(--blue); }
+  .lyr .lbtn.x:hover:not(:disabled) { color: var(--red); }
+  .lyr .lbtn:disabled { opacity: 0.25; cursor: default; }
+
+  #dropOverlay {
+    position: fixed; inset: 0; z-index: 50; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(43,80,200,.10); border: 3px dashed var(--blue);
+  }
+  #dropOverlay span {
+    font-family: var(--mono); font-size: 17px; letter-spacing: 0.08em; color: var(--blue);
+    background: var(--paper); border: 1px solid var(--blue); padding: 14px 22px;
+  }
+
   .actions { display: grid; gap: 8px; margin: 16px 0 8px; }
   button {
     font-family: var(--mono);
@@ -163,6 +183,7 @@
 </style>
 </head>
 <body>
+<div id="dropOverlay" hidden><span>Slipp SVG(er) — hvert lag = én penn</span></div>
 <div class="sheet">
   <header>
     <h1>strek<span class="caret">_</span></h1>
@@ -172,12 +193,11 @@
   <div class="layout">
     <div>
       <label class="drop" id="drop" tabindex="0">
-        <span id="dropIdle"><strong>Drop an SVG here</strong><br>or click to browse</span>
-        <span class="file" id="dropFile" hidden></span>
-        <input type="file" id="fileInput" accept=".svg,image/svg+xml" hidden>
+        <span id="dropIdle"><strong>Drop SVG(s) here</strong><br>or click to browse<br><span class="microlabel">each file = one pen layer</span></span>
+        <input type="file" id="fileInput" accept=".svg,image/svg+xml" multiple hidden>
       </label>
-      <p class="hint">Any SVG works — paths, shapes and transforms are flattened in the browser.
-        vpype-optimized files (linemerge/linesort) plot fastest.</p>
+      <div class="layers-list" id="layerList" hidden></div>
+      <p class="hint">Drop several SVGs to plot them as separate pen layers in one job — the plotter pauses between layers so you can swap pens. Paths, shapes and transforms flatten in the browser; vpype-optimized files plot fastest.</p>
       <p class="hint" id="progress" role="status" aria-live="polite" hidden></p>
 
       <fieldset>
@@ -257,7 +277,7 @@
   </div>
 
   <footer>
-    <span>Workflow: file homes WITHOUT pen &#8594; pauses (M400 U1) &#8594; mount pen &#8594; resume. Stay at the machine.</span>
+    <span>Workflow: homes WITHOUT pen &#8594; pauses (M400 U1) &#8594; mount pen &#8594; resume. Multi-layer: pauses again between layers to swap pens. Stay at the machine.</span>
     <a href="https://github.com/mhellevang/strek">github.com/mhellevang/strek</a>
   </footer>
 </div>
@@ -277,10 +297,14 @@ const PX_TO_MM = 25.4 / 96;
 const $ = id => document.getElementById(id);
 
 /* ============ state ============ */
-let source = null;   // {kind:'svg', name, paths: [[x,y]...] in mm, y-down}
+let source = null;   // {kind:'svg', layers:[{name, paths:[[x,y]...] mm y-down}]}
+                     // each layer = one pen; plotter pauses between layers.
                      // or {kind:'cal'}
 let result = null;   // computed placement + gcode, or null when invalid
-let rotation = 0;    // 0/90/180/270 — applied to the design before placement
+let rotation = 0;    // 0/90/180/270 — applied to every layer before placement
+
+// per-layer preview / pen colors (cycles if more layers than colors)
+const LAYER_COLORS = ["#2B50C8", "#C63A2F", "#9A6A08", "#1F9E5A", "#6A3FB5", "#0E7490"];
 
 /* ============ params ============ */
 function params() {
@@ -448,7 +472,9 @@ function rotatePaths(paths, deg) {
   return paths.map(path => path.map(map));
 }
 
-function place(pathsMm, p) {
+// layersMm: array of layers, each an array of paths. All layers share ONE
+// bounding box / scale / offset so they stay registered to each other on paper.
+function place(layersMm, p) {
   const warnings = [];
   const [pw, ph] = p.paper;
   const px0 = PAPER_RIGHT - pw, px1 = PAPER_RIGHT;
@@ -460,11 +486,13 @@ function place(pathsMm, p) {
   if (ux1 <= ux0 || uy1 <= uy0)
     return { error: "Drawable area is empty — check paper size, margin and pen offsets." };
 
+  // union bounding box across every layer → shared registration
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const path of pathsMm) for (const [x, y] of path) {
+  for (const layer of layersMm) for (const path of layer) for (const [x, y] of path) {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
   }
+  if (!(maxX >= minX)) return { error: "No strokes to place." };
   const w = maxX - minX, h = maxY - minY;
   const fit = Math.min(w ? (ux1 - ux0) / w : 1, h ? (uy1 - uy0) / h : 1);
   const s = p.upscale ? fit : Math.min(1, fit);
@@ -478,11 +506,11 @@ function place(pathsMm, p) {
     warnings.push("Drawing can't sit at the paper's center (pen can't reach) — shifted to where the pen reaches.");
 
   const x0 = cx - outW / 2, y0 = cy - outH / 2;
-  const penPaths = pathsMm.map(path =>
-    path.map(([x, y]) => [x0 + (x - minX) * s, y0 + (maxY - y) * s])); // flip Y
+  const layers = layersMm.map(layer => layer.map(path =>
+    path.map(([x, y]) => [x0 + (x - minX) * s, y0 + (maxY - y) * s]))); // flip Y
   const margins = [py1 - (cy + outH / 2), (cy - outH / 2) - py0,
                    (cx - outW / 2) - px0, px1 - (cx + outW / 2)];
-  return { penPaths, w: outW, h: outH, scale: s, fit, margins, warnings,
+  return { layers, w: outW, h: outH, scale: s, fit, margins, warnings,
            paperRect: [px0, px1, py0, py1], window: [ux0, ux1, uy0, uy1] };
 }
 
@@ -503,13 +531,16 @@ function calibrationPaths(p) {
   const warnings = [];
   if (Math.abs(cx - (px0 + px1) / 2) > 0.5 || Math.abs(cy - (py0 + py1) / 2) > 0.5)
     warnings.push("Paper center is out of pen reach — cross shifted; measure against its expected position, not the center.");
-  return { penPaths, w: arm * 2, h: arm * 2, scale: 1, fit: 1, margins: null, warnings,
+  return { layers: [penPaths], w: arm * 2, h: arm * 2, scale: 1, fit: 1, margins: null, warnings,
            paperRect: [px0, px1, py0, py1], window: null };
 }
 
 /* ============ G-code (mirror of generate() in svg2gcode.py) ============ */
-function toNozzle(penPaths, p) {
-  return penPaths.map(path => path.map(([x, y]) => [x - p.penDx, y - p.penDy]));
+// pen (tip) coords → nozzle coords, per layer. Layer structure is preserved so
+// gcode() can insert a pause between layers.
+function toNozzleLayers(layers, p) {
+  return layers.map(layer =>
+    layer.map(path => path.map(([x, y]) => [x - p.penDx, y - p.penDy])));
 }
 
 function checkBounds(nozzlePaths) {
@@ -536,16 +567,22 @@ function metrics(nozzlePaths, p) {
   return { drawLen, travelLen, seconds };
 }
 
-function gcode(nozzlePaths, p, srcName) {
+// nozzleLayers: array of layers (each an array of paths). One pen per layer;
+// the machine pauses (M400 U1) between layers so the operator swaps pens.
+function gcode(nozzleLayers, p, srcName) {
   const zUp = p.zDraw + p.zHop;
+  const zClear = zUp + 30;
   const fDraw = Math.round(p.vDraw * 60), fTravel = Math.round(p.vTravel * 60), fZ = Math.round(p.vZ * 60);
   const park = [152, 70];
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const nLayers = nozzleLayers.length;
+  const multi = nLayers > 1;
+  const flat = nozzleLayers.flat();
 
-  // per-path time cost first, so M73 progress is time-weighted
+  // per-path time cost across all layers, so M73 progress is time-weighted
   const costs = [];
   let pos = park;
-  for (const path of nozzlePaths) {
+  for (const path of flat) {
     let draw = 0;
     for (let i = 1; i < path.length; i++) draw += dist(path[i - 1], path[i]);
     costs.push(dist(pos, path[0]) / p.vTravel + draw / p.vDraw + 2 * p.zHop / p.vZ);
@@ -557,6 +594,7 @@ function gcode(nozzlePaths, p, srcName) {
     `; Plotter G-code generated by strek — ${srcName}`,
     `; z_draw=${p.zDraw} z_hop=${p.zHop} draw=${p.vDraw}mm/s travel=${p.vTravel}mm/s`,
     `; pen_dx=${p.penDx} pen_dy=${p.penDy} paper=${p.paper[0]}x${p.paper[1]}`,
+    multi ? `; ${nLayers} pen layers — machine PAUSES between each to swap pens` : null,
     "; NO heating, NO extrusion. Homes WITHOUT pen, pauses for pen mounting.",
     ";",
     "G21 ; millimeters",
@@ -567,32 +605,45 @@ function gcode(nozzlePaths, p, srcName) {
     "M106 P2 S0 ; aux fan off",
     "M106 P3 S0 ; chamber fan off",
     "G28 ; home all axes — PEN MUST NOT BE MOUNTED YET",
-    `G0 Z${(zUp + 30).toFixed(1)} F${fZ}`,
+    `G0 Z${zClear.toFixed(1)} F${fZ}`,
     `G0 X${park[0]} Y${park[1]} F${fTravel} ; park near the front`,
-    "M400 U1 ; PAUSE: mount the pen, press resume",
+    multi ? "M400 U1 ; PAUSE: mount pen 1, press resume"
+          : "M400 U1 ; PAUSE: mount the pen, press resume",
     "M73 P0",
     `G0 Z${zUp.toFixed(1)} F${fZ}`,
-  ];
+  ].filter(x => x !== null);
 
-  let drawLen = 0, travelLen = 0, elapsed = 0, pct = 0;
+  let drawLen = 0, travelLen = 0, elapsed = 0, pct = 0, ci = 0;
   pos = park;
-  nozzlePaths.forEach((path, i) => {
-    travelLen += dist(pos, path[0]);
-    L.push(`G0 X${path[0][0].toFixed(3)} Y${path[0][1].toFixed(3)} F${fTravel}`);
-    L.push(`G1 Z${p.zDraw.toFixed(1)} F${fZ}`);
-    for (let j = 1; j < path.length; j++) {
-      L.push(`G1 X${path[j][0].toFixed(3)} Y${path[j][1].toFixed(3)} F${fDraw}`);
-      drawLen += dist(path[j - 1], path[j]);
+  nozzleLayers.forEach((layer, li) => {
+    if (li > 0) {
+      // pen swap: lift clear, park at front, pause, drop back to hop height
+      L.push(
+        `; --- layer ${li + 1} of ${nLayers} ---`,
+        `G0 Z${zClear.toFixed(1)} F${fZ}`,
+        `G0 X${park[0]} Y${park[1]} F${fTravel}`,
+        `M400 U1 ; PAUSE: swap to pen ${li + 1}, press resume`,
+        `G0 Z${zUp.toFixed(1)} F${fZ}`);
+      pos = park;
     }
-    L.push(`G0 Z${zUp.toFixed(1)} F${fZ}`);
-    pos = path[path.length - 1];
-    elapsed += costs[i];
-    const np = Math.min(99, Math.floor(100 * elapsed / total));
-    if (np > pct) { pct = np; L.push(`M73 P${pct}`); }
+    layer.forEach(path => {
+      travelLen += dist(pos, path[0]);
+      L.push(`G0 X${path[0][0].toFixed(3)} Y${path[0][1].toFixed(3)} F${fTravel}`);
+      L.push(`G1 Z${p.zDraw.toFixed(1)} F${fZ}`);
+      for (let j = 1; j < path.length; j++) {
+        L.push(`G1 X${path[j][0].toFixed(3)} Y${path[j][1].toFixed(3)} F${fDraw}`);
+        drawLen += dist(path[j - 1], path[j]);
+      }
+      L.push(`G0 Z${zUp.toFixed(1)} F${fZ}`);
+      pos = path[path.length - 1];
+      elapsed += costs[ci++];
+      const np = Math.min(99, Math.floor(100 * elapsed / total));
+      if (np > pct) { pct = np; L.push(`M73 P${pct}`); }
+    });
   });
 
   L.push(
-    `G0 Z${(zUp + 30).toFixed(1)} F${fZ}`,
+    `G0 Z${zClear.toFixed(1)} F${fZ}`,
     `G0 X${park[0]} Y240 F${fTravel} ; head to the back — remove sheet/pen`,
     "M400",
     "M73 P100",
@@ -677,29 +728,35 @@ function renderPreview(res) {
     }
   }
 
-  if (res && res.penPaths) {
-    // travel moves: faint dashed
+  if (res && res.layers) {
+    // travel moves: faint dashed, across the whole plot order (incl. between layers)
     let d = "", prev = null;
-    for (const path of res.penPaths) {
+    for (const layer of res.layers) for (const path of layer) {
       if (prev) d += `M${prev[0].toFixed(2)} ${flipY(prev[1]).toFixed(2)} L${path[0][0].toFixed(2)} ${flipY(path[0][1]).toFixed(2)}`;
       prev = path[path.length - 1];
     }
     if (d) svg.appendChild(el("path", { d, fill: "none", stroke: "#B7C0CE", "stroke-width": 0.3, "stroke-dasharray": "1.4 1.8" }));
 
-    // ink strokes, animated draw-in
-    let ink = "";
-    for (const path of res.penPaths) {
-      ink += `M${path[0][0].toFixed(2)} ${flipY(path[0][1]).toFixed(2)}`;
-      for (let i = 1; i < path.length; i++) ink += `L${path[i][0].toFixed(2)} ${flipY(path[i][1]).toFixed(2)}`;
-    }
-    const inkPath = el("path", { d: ink, fill: "none", stroke: "#2B50C8", "stroke-width": 0.45, "stroke-linecap": "round", "stroke-linejoin": "round" });
-    svg.appendChild(inkPath);
-    // animatePlot calls getTotalLength on the whole path — expensive on big
-    // designs. Skip it (and the replay button) past a point threshold.
+    // animatePlot calls getTotalLength on each path — expensive on big designs.
+    // Skip it (and the replay button) past a point threshold.
     let nPts = 0;
-    for (const path of res.penPaths) nPts += path.length;
+    for (const layer of res.layers) for (const path of layer) nPts += path.length;
     const canAnimate = nPts <= 20000;
-    if (canAnimate) animatePlot(inkPath);
+
+    // one ink path per layer, in its pen color
+    res.layers.forEach((layer, li) => {
+      let ink = "";
+      for (const path of layer) {
+        if (!path.length) continue;
+        ink += `M${path[0][0].toFixed(2)} ${flipY(path[0][1]).toFixed(2)}`;
+        for (let i = 1; i < path.length; i++) ink += `L${path[i][0].toFixed(2)} ${flipY(path[i][1]).toFixed(2)}`;
+      }
+      if (!ink) return;
+      const color = LAYER_COLORS[li % LAYER_COLORS.length];
+      const inkPath = el("path", { d: ink, fill: "none", stroke: color, "stroke-width": 0.45, "stroke-linecap": "round", "stroke-linejoin": "round" });
+      svg.appendChild(inkPath);
+      if (canAnimate) animatePlot(inkPath);
+    });
     $("replay").hidden = !canAnimate;
   } else {
     $("replay").hidden = true;
@@ -728,19 +785,24 @@ function refresh() {
 
   let res = null;
   if (!stops.length && source) {
-    res = source.kind === "cal" ? calibrationPaths(p)
-                                : place(rotatePaths(source.paths, rotation), p);
+    if (source.kind === "cal") res = calibrationPaths(p);
+    else {
+      const layersMm = source.layers.map(l => rotatePaths(l.paths, rotation));
+      res = place(layersMm, p);
+    }
     if (res.error) { stops.push(res.error); res = null; }
   }
   if (res) {
     warns.push(...res.warnings);
-    const nozzle = toNozzle(res.penPaths, p);
-    const boundErr = checkBounds(nozzle);
+    const nozzleLayers = toNozzleLayers(res.layers, p);
+    const boundErr = checkBounds(nozzleLayers.flat());
     if (boundErr) { stops.push(boundErr); res = null; }
     else {
-      const name = source.kind === "cal" ? "calibration cross" : source.name;
-      // Store nozzle paths + params; build the G-code text lazily on download.
-      result = { ...res, ...metrics(nozzle, p), name, nozzle, p };
+      const nLayers = res.layers.length;
+      const name = source.kind === "cal" ? "calibration cross"
+                 : source.layers.map(l => l.name).join(" + ");
+      // Store nozzle layers + params; build the G-code text lazily on download.
+      result = { ...res, ...metrics(nozzleLayers.flat(), p), name, nozzleLayers, nLayers, p };
     }
   }
 
@@ -754,6 +816,7 @@ function refresh() {
   }
   renderPreview(previewRes);
   renderTitleblock(result, p);
+  renderLayerList();
   $("messages").innerHTML =
     stops.map(m => `<div class="msg stop">${esc(m)}</div>`).join("") +
     warns.map(m => `<div class="msg warn">${esc(m)}</div>`).join("");
@@ -763,15 +826,36 @@ function refresh() {
 }
 
 function renderTitleblock(r, p) {
-  $("tbFile").textContent = r ? r.name : "—";
+  $("tbFile").textContent = r ? (r.nLayers > 1 ? `${r.nLayers} lag` : r.name) : "—";
   $("tbSize").textContent = r ? `${r.w.toFixed(0)}×${r.h.toFixed(0)} on ${p.paper[0]}×${p.paper[1]}` : "—";
   $("tbReach").textContent = (r && r.window)
     ? `${(r.window[1] - r.window[0]).toFixed(0)}×${(r.window[3] - r.window[2]).toFixed(0)} mm`
     : "—";
   $("tbScale").textContent = r ? (r.scale === 1 ? "1:1" : `${(r.scale * 100).toFixed(0)} %`) : "—";
-  $("tbPaths").textContent = r ? r.penPaths.length : "—";
+  const nPaths = r ? r.layers.reduce((a, l) => a + l.length, 0) : 0;
+  $("tbPaths").textContent = r ? (r.nLayers > 1 ? `${nPaths} · ${r.nLayers} lag` : `${nPaths}`) : "—";
   $("tbLen").textContent = r ? `${(r.drawLen / 1000).toFixed(1)} / ${(r.travelLen / 1000).toFixed(1)} m` : "—";
   $("tbTime").textContent = r ? `~${Math.max(1, Math.round(r.seconds / 60))} min +` : "—";
+}
+
+function renderLayerList() {
+  const list = $("layerList");
+  const hasLayers = !!(source && source.kind === "svg" && source.layers.length);
+  $("dropIdle").hidden = hasLayers;
+  list.hidden = !hasLayers;
+  if (!hasLayers) { list.textContent = ""; return; }
+  const n = source.layers.length;
+  list.innerHTML = source.layers.map((l, i) => {
+    const color = LAYER_COLORS[i % LAYER_COLORS.length];
+    return `<div class="lyr">
+      <span class="sw" style="background:${color}"></span>
+      <span class="nm">${esc(l.name)}</span>
+      <span class="pen">penn ${i + 1}</span>
+      <button class="lbtn" data-act="up" data-i="${i}" ${i === 0 ? "disabled" : ""} title="Flytt opp" aria-label="Flytt opp">&#9650;</button>
+      <button class="lbtn" data-act="down" data-i="${i}" ${i === n - 1 ? "disabled" : ""} title="Flytt ned" aria-label="Flytt ned">&#9660;</button>
+      <button class="lbtn x" data-act="rm" data-i="${i}" title="Fjern lag" aria-label="Fjern lag">&#10005;</button>
+    </div>`;
+  }).join("");
 }
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -783,51 +867,78 @@ const setProgress = msg => {
   if (msg) el.textContent = msg;
 };
 
-async function loadFile(file) {
-  try {
-    setProgress("Reading file…");
-    const text = await file.text();
-    const paths = await parseSvg(text, frac => setProgress(`Parsing… ${Math.round(frac * 100)}%`));
-    source = { kind: "svg", name: file.name, paths };
-    rotation = 0;
-    $("dropIdle").hidden = true;
-    $("dropFile").hidden = false;
-    $("dropFile").textContent = file.name;
-  } catch (e) {
-    source = null;
-    $("dropIdle").hidden = false;
-    $("dropFile").hidden = true;
-    setProgress(null);
-    refresh(); // rebuilds #messages from empty state — must run before we show the error
-    $("messages").innerHTML = `<div class="msg stop">${esc(e.message)}</div>`;
-    return;
+// Append each dropped/selected SVG as a new pen layer. A cal source (or none)
+// is replaced by a fresh layered svg source; existing layers are kept.
+async function loadFiles(fileList) {
+  const files = [...fileList].filter(f => /\.svg$/i.test(f.name) || f.type === "image/svg+xml");
+  if (!files.length) return;
+  if (!source || source.kind !== "svg") { source = { kind: "svg", layers: [] }; rotation = 0; }
+  const errors = [];
+  for (let k = 0; k < files.length; k++) {
+    const file = files[k];
+    const tag = files.length > 1 ? ` ${k + 1}/${files.length}` : "";
+    try {
+      setProgress(`Reading${tag}…`);
+      const text = await file.text();
+      const paths = await parseSvg(text, frac => setProgress(`Parsing${tag}… ${Math.round(frac * 100)}%`));
+      source.layers.push({ name: file.name, paths });
+    } catch (e) {
+      errors.push(`${file.name}: ${e.message}`);
+    }
   }
+  if (!source.layers.length) source = null;
   setProgress(null);
-  refresh();
+  refresh(); // rebuilds #messages — must run before we prepend load errors
+  if (errors.length)
+    $("messages").insertAdjacentHTML("afterbegin",
+      errors.map(m => `<div class="msg stop">${esc(m)}</div>`).join(""));
 }
 
-$("fileInput").addEventListener("change", e => e.target.files[0] && loadFile(e.target.files[0]));
-const drop = $("drop");
-drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("armed"); });
-drop.addEventListener("dragleave", () => drop.classList.remove("armed"));
-drop.addEventListener("drop", e => {
-  e.preventDefault(); drop.classList.remove("armed");
-  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+$("fileInput").addEventListener("change", e => {
+  if (e.target.files.length) loadFiles(e.target.files);
+  e.target.value = ""; // allow re-selecting the same file
 });
-drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } });
+$("drop").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); }
+});
+
+// Whole-window drop target: a full-page overlay appears while dragging files, so
+// the design can be dropped anywhere — including onto the bed preview.
+let dragDepth = 0;
+const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+window.addEventListener("dragenter", e => { if (hasFiles(e)) { dragDepth++; $("dropOverlay").hidden = false; } });
+window.addEventListener("dragover", e => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener("dragleave", e => { if (hasFiles(e)) { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $("dropOverlay").hidden = true; } });
+window.addEventListener("drop", e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; $("dropOverlay").hidden = true;
+  if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+});
+
+// Layer list: reorder (pen order) / remove
+$("layerList").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn || !source || source.kind !== "svg") return;
+  const i = +btn.dataset.i, act = btn.dataset.act, L = source.layers;
+  if (act === "rm") L.splice(i, 1);
+  else if (act === "up" && i > 0) [L[i - 1], L[i]] = [L[i], L[i - 1]];
+  else if (act === "down" && i < L.length - 1) [L[i + 1], L[i]] = [L[i], L[i + 1]];
+  if (!L.length) source = null;
+  refresh();
+});
 
 $("calibrate").addEventListener("click", () => {
   source = { kind: "cal" };
-  $("dropIdle").hidden = false;
-  $("dropFile").hidden = true;
   refresh();
 });
 
 $("download").addEventListener("click", () => {
   if (!result) return;
   const base = source.kind === "cal" ? "calibration-cross"
-    : source.name.replace(/\.svg$/i, "");
-  const { text } = gcode(result.nozzle, result.p, result.name);
+    : (source.layers.length > 1
+        ? source.layers[0].name.replace(/\.svg$/i, "") + "-multilag"
+        : source.layers[0].name.replace(/\.svg$/i, ""));
+  const { text } = gcode(result.nozzleLayers, result.p, result.name);
   const blob = new Blob([text], { type: "text/plain" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
