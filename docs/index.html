@@ -127,7 +127,7 @@
 
   .titleblock {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     border: 1px solid var(--ink);
     border-top: none;
     background: var(--sheet);
@@ -247,6 +247,7 @@
       <div class="titleblock" id="titleblock">
         <div class="tb"><div class="microlabel">File</div><div class="v" id="tbFile">—</div></div>
         <div class="tb"><div class="microlabel">Drawing</div><div class="v" id="tbSize">—</div></div>
+        <div class="tb"><div class="microlabel">Reachable</div><div class="v" id="tbReach">—</div></div>
         <div class="tb"><div class="microlabel">Scale</div><div class="v" id="tbScale">—</div></div>
         <div class="tb"><div class="microlabel">Paths</div><div class="v" id="tbPaths">—</div></div>
         <div class="tb"><div class="microlabel">Ink / travel</div><div class="v" id="tbLen">—</div></div>
@@ -658,6 +659,19 @@ function renderPreview(res) {
       const iy0 = Math.max(py0, uy0), iy1 = Math.min(py1, uy1);
       if (ix1 > ix0 && iy1 > iy0)
         svg.appendChild(el("rect", { x: ix0, y: flipY(iy1), width: ix1 - ix0, height: iy1 - iy0, fill: "#FFFFFF" }));
+      // pen-reach frontier: how far toward the front the pen tip can draw.
+      // Red is the NOZZLE keep-out; the pen reaches past it via the offset,
+      // so this line — not the red edge — is the real bottom limit.
+      if (uy0 > py0 + 0.5) {
+        const ly = flipY(uy0);
+        svg.appendChild(el("line", { x1: px0, y1: ly, x2: px1, y2: ly,
+          stroke: "#1F9E5A", "stroke-width": 0.8, "stroke-dasharray": "4 2" }));
+        const lbl = el("text", { x: px0 + 2, y: ly - 2,
+          "font-family": "ui-monospace, Menlo, monospace", "font-size": "5",
+          fill: "#1F9E5A", "letter-spacing": "0.5" });
+        lbl.textContent = `pen reaches here — ${(py1 - uy0).toFixed(0)} mm from top`;
+        svg.appendChild(lbl);
+      }
     } else {
       svg.appendChild(el("rect", { x: px0, y: flipY(py1), width: px1 - px0, height: py1 - py0, fill: "#FFFFFF" }));
     }
@@ -751,6 +765,9 @@ function refresh() {
 function renderTitleblock(r, p) {
   $("tbFile").textContent = r ? r.name : "—";
   $("tbSize").textContent = r ? `${r.w.toFixed(0)}×${r.h.toFixed(0)} on ${p.paper[0]}×${p.paper[1]}` : "—";
+  $("tbReach").textContent = (r && r.window)
+    ? `${(r.window[1] - r.window[0]).toFixed(0)}×${(r.window[3] - r.window[2]).toFixed(0)} mm`
+    : "—";
   $("tbScale").textContent = r ? (r.scale === 1 ? "1:1" : `${(r.scale * 100).toFixed(0)} %`) : "—";
   $("tbPaths").textContent = r ? r.penPaths.length : "—";
   $("tbLen").textContent = r ? `${(r.drawLen / 1000).toFixed(1)} / ${(r.travelLen / 1000).toFixed(1)} m` : "—";
