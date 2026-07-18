@@ -248,10 +248,28 @@ the slicer then centers physically on the sheet with no offset fiddling.
 Regular fonts are outline fonts (filled contours); a plotter draws
 strokes. Three techniques, happily combined:
 
-1. **Single-stroke fonts (Hershey)** — every letter is one pen path.
-   3dplotter.xyz has 50+ built in; Inkscape has the Hershey Text
-   extension with the EMS script fonts (EMS Allure etc. — calligraphic
-   style made for plotters); `vpype text` from the command line
+1. **Single-stroke fonts (Hershey)** — every letter is one pen path. Our
+   own [`calligraphy/text2svg.py`](calligraphy/text2svg.py) does this with
+   no Inkscape: text in → single-stroke SVG out, ready for the pipeline.
+   Ships with calligraphic EMS script fonts (Allure, Delight, Casual Hand,
+   Brush) and classic Hershey (`cursive`, `scripts`, `gothiceng` — the
+   1960s-pen look):
+
+   ```
+   python3 calligraphy/text2svg.py "Hei Strek" --font EMSAllure --size 14
+   python3 calligraphy/text2svg.py dikt.txt --font cursive -o dikt.svg
+   python3 calligraphy/text2svg.py --list-fonts
+   ```
+
+   The EMS fonts are stored as coarse polylines, so a Chaikin `--smooth`
+   pass (default 2) rounds them into flowing script; use `--smooth 0` to
+   keep the sharp corners of `gothiceng`. `--size` is the cap-height in mm;
+   the toolkit stays paper-agnostic and lets `svg2gcode.py` place the text
+   (see
+   [ADR 0001](docs/adr/0001-calligraphy-toolkit-is-paper-agnostic.md)).
+   Fonts and their licenses: [calligraphy/fonts/CREDITS.md](calligraphy/fonts/CREDITS.md).
+   Other options: 3dplotter.xyz has 50+ built in; Inkscape has the Hershey
+   Text extension; `vpype text` from the command line
 2. **The pen does the calligraphy** — broad-edge calligraphy IS a pen at
    a constant angle where stroke width varies with direction, and a
    plotter holds the angle perfectly. Pilot Parallel + a simple script
