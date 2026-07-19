@@ -116,7 +116,8 @@
       </fieldset>
 
       <div class="actions">
-        <button class="primary" id="download" disabled>Last ned SVG</button>
+        <button class="primary" id="toPlotter" disabled>Send til plotter &#8594;</button>
+        <button id="download" disabled>Last ned SVG</button>
       </div>
       <div class="messages" id="messages"></div>
     </div>
@@ -249,6 +250,7 @@ function refresh() {
   $("sStrokes").textContent = r.empty ? "—" : r.strokes.length;
   $("sPts").textContent = r.empty ? "—" : npts;
   $("download").disabled = r.empty;
+  $("toPlotter").disabled = r.empty;
 
   const msgs = [];
   if (r.missing && r.missing.length)
@@ -267,6 +269,21 @@ $("download").addEventListener("click", () => {
   a.download = `${slug(r.text.split("\n")[0])}.svg`;
   a.click();
   URL.revokeObjectURL(a.href);
+});
+
+// Hand the generated SVG to the plotter page via sessionStorage, then navigate.
+// index.html picks it up on load and adds it as a pen layer.
+$("toPlotter").addEventListener("click", () => {
+  const r = build();
+  if (r.empty) return;
+  const payload = { name: slug(r.text.split("\n")[0]) + ".svg", svg: toSvg(r.strokes, r.w, r.h) };
+  try {
+    sessionStorage.setItem("strek-handoff", JSON.stringify(payload));
+  } catch (e) {
+    $("messages").innerHTML = `<div class="msg stop">Kunne ikke sende til plotter (${e.message}). Last ned SVG-en og slipp den i generatoren i stedet.</div>`;
+    return;
+  }
+  location.href = "index.html";
 });
 
 $("fileInput").addEventListener("change", async e => {

@@ -947,6 +947,29 @@ $("download").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+// Handoff from text.html: it stores {name, svg} in sessionStorage then routes
+// here. Consume it once (clear immediately so a reload doesn't re-add it) and
+// load the SVG as the first pen layer.
+async function consumeHandoff() {
+  let raw = null;
+  try { raw = sessionStorage.getItem("strek-handoff"); sessionStorage.removeItem("strek-handoff"); }
+  catch { return; }
+  if (!raw) return;
+  let payload;
+  try { payload = JSON.parse(raw); } catch { return; }
+  if (!payload || !payload.svg) return;
+  try {
+    const paths = await parseSvg(payload.svg);
+    source = { kind: "svg", layers: [{ name: payload.name || "tekst.svg", paths }] };
+    rotation = 0;
+    refresh();
+  } catch (e) {
+    refresh();
+    $("messages").insertAdjacentHTML("afterbegin",
+      `<div class="msg stop">${esc("Kunne ikke lese teksten fra tekst-verktøyet: " + e.message)}</div>`);
+  }
+}
+
 $("rotate").addEventListener("click", () => { rotation = (rotation + 90) % 360; refresh(); });
 $("replay").addEventListener("click", refresh);
 $("paper").addEventListener("change", () => { $("customPaper").hidden = $("paper").value !== "custom"; refresh(); });
@@ -961,6 +984,7 @@ for (const id of ["pw", "ph", "margin", "upscale", "zdraw", "zhop", "pendx", "pe
   $(id).addEventListener("input", debouncedRefresh);
 
 refresh();
+consumeHandoff();
 </script>
 </body>
 </html>
