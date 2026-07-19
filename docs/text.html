@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>strek — tekst til SVG</title>
+<meta name="description" content="Skriv tekst, velg en enkeltstrøk-font, og last ned en plottbar SVG for strek-pipelinen.">
+<style>
+  :root {
+    --paper: #FBFBF8; --sheet: #FFFFFF; --ink: #1C2740; --muted: #5B6675;
+    --rule: #C9CFD8; --grid: #E7EBF0; --blue: #2B50C8; --red: #C63A2F; --amber: #9A6A08;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #14161B; --sheet: #1B1E25; --ink: #E7EBF2; --muted: #97A0B0;
+      --rule: #333A46; --grid: #262B33; --blue: #7E9BFF; --red: #FF8A7E; --amber: #E0B24A; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  [hidden] { display: none !important; }
+  html, body { background: var(--paper); color: var(--ink); }
+  body { font-family: var(--sans); font-size: 15px; line-height: 1.45; padding: 20px; }
+  .sheet { max-width: 1180px; margin: 0 auto; border: 1.5px solid var(--ink);
+    outline: 1px solid var(--ink); outline-offset: 3px; background: var(--paper);
+    padding: 26px 28px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-family: var(--mono); font-size: 24px; font-weight: 600;
+    letter-spacing: 0.24em; text-transform: uppercase; }
+  h1 .caret { color: var(--blue); }
+  .tagline { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
+
+  .layout { display: grid; grid-template-columns: 340px 1fr; gap: 28px; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  .microlabel { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); }
+  fieldset { border: none; border-top: 1px solid var(--rule); padding: 12px 0 14px; }
+  legend { padding-right: 10px; }
+  .row { display: flex; gap: 10px; margin-top: 8px; }
+  .field { flex: 1; min-width: 0; }
+  .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
+  textarea, input[type="number"], select {
+    width: 100%; font-family: var(--mono); font-size: 13.5px; color: var(--ink);
+    background: var(--sheet); border: 1px solid var(--rule); border-radius: 0; padding: 6px 8px; }
+  textarea { resize: vertical; min-height: 88px; line-height: 1.4; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, .file:focus-visible {
+    outline: 2px solid var(--blue); outline-offset: 1px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  .file { display: inline-block; margin-top: 8px; font-family: var(--mono); font-size: 12.5px;
+    border: 1px dashed var(--rule); background: var(--sheet); padding: 7px 10px; cursor: pointer; color: var(--muted); }
+  .file strong { color: var(--ink); }
+
+  .actions { display: grid; gap: 8px; margin: 16px 0 8px; }
+  button { font-family: var(--mono); font-size: 13.5px; letter-spacing: 0.05em; padding: 10px 14px;
+    border-radius: 0; cursor: pointer; border: 1px solid var(--ink); background: var(--sheet); color: var(--ink); }
+  button.primary { background: var(--ink); color: var(--paper); }
+  button.primary:disabled { background: var(--rule); border-color: var(--rule); color: var(--sheet); cursor: not-allowed; }
+  button:not(.primary):hover { border-color: var(--blue); color: var(--blue); }
+  button.primary:not(:disabled):hover { background: var(--blue); border-color: var(--blue); }
+
+  .messages { display: grid; gap: 6px; margin-top: 10px; }
+  .msg { font-family: var(--mono); font-size: 12px; padding: 7px 9px; border-left: 3px solid; }
+  .msg.warn { color: var(--amber); border-color: var(--amber); }
+  .msg.stop { color: var(--red); border-color: var(--red); }
+
+  .previewwrap { background: var(--sheet); border: 1px solid var(--rule); padding: 18px 20px;
+    min-height: 220px; display: block; text-align: center; }
+  .previewwrap svg { display: block; width: 100%; height: auto; max-height: 60vh; margin: auto; color: var(--ink); }
+  .previewwrap .empty { color: var(--muted); font-family: var(--mono); font-size: 13px; line-height: 184px; }
+  .stat { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--ink);
+    border-top: none; background: var(--sheet); }
+  .stat .tb { padding: 7px 10px 8px; border-right: 1px solid var(--rule); min-width: 0; }
+  .stat .tb:last-child { border-right: none; }
+  .stat .tb .v { font-family: var(--mono); font-size: 12.5px; margin-top: 1px; }
+
+  footer { margin-top: 22px; border-top: 1px solid var(--ink); padding-top: 12px;
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  footer a { color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1>strek<span class="caret">_</span> tekst</h1>
+    <p class="tagline">tekst &#8594; enkeltstrøk-SVG · plottbar rett inn i strek-generatoren</p>
+  </header>
+
+  <div class="layout">
+    <div>
+      <fieldset style="border-top:none;padding-top:0">
+        <legend class="microlabel">Tekst</legend>
+        <textarea id="text" placeholder="Skriv her…&#10;flere linjer støttes">Blåbær på fløte</textarea>
+        <label class="file" tabindex="0">Last opp .txt-fil
+          <input type="file" id="fileInput" accept=".txt,text/plain" hidden></label>
+        <p class="hint">Linjeskift blir egne linjer. Æøå fungerer i EMS-fontene; Hershey er ASCII.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend class="microlabel">Font</legend>
+        <div class="row"><div class="field"><select id="font"></select></div></div>
+      </fieldset>
+
+      <fieldset>
+        <legend class="microlabel">Geometri</legend>
+        <div class="row">
+          <div class="field"><label for="size">Cap-høyde mm</label><input type="number" id="size" value="10" min="1" step="0.5"></div>
+          <div class="field"><label for="ls">Tegnavstand mm</label><input type="number" id="ls" value="0" step="0.5"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="lh">Linjehøyde mm</label><input type="number" id="lh" value="" placeholder="auto (1.8×)" step="0.5"></div>
+          <div class="field"><label for="smooth">Utjevning</label><input type="number" id="smooth" value="2" min="0" max="5" step="1"></div>
+        </div>
+        <p class="hint">Utjevning (Chaikin) runder de grovt lagrede EMS-kurvene. 0 = rå polylinje.</p>
+      </fieldset>
+
+      <div class="actions">
+        <button class="primary" id="download" disabled>Last ned SVG</button>
+      </div>
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <div>
+      <div class="previewwrap"><span class="empty" id="previewEmpty">Laster fonter…</span>
+        <svg id="preview" hidden role="img" aria-label="Forhåndsvisning av teksten"></svg></div>
+      <div class="stat">
+        <div class="tb"><div class="microlabel">Font</div><div class="v" id="sFont">—</div></div>
+        <div class="tb"><div class="microlabel">Størrelse</div><div class="v" id="sSize">—</div></div>
+        <div class="tb"><div class="microlabel">Strøk</div><div class="v" id="sStrokes">—</div></div>
+        <div class="tb"><div class="microlabel">Punkter</div><div class="v" id="sPts">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <a href="index.html">&#8592; strek-generatoren</a>
+    <span><a href="fonts.html">font-galleri</a> &#183; <a href="https://github.com/mhellevang/strek">github.com/mhellevang/strek</a></span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+let FONTS = null;
+
+/* ---- layout: mirror of text2svg.layout() (font units, y-down) ---- */
+function layout(text, font, sizeMm, lineHeightMm, lsMm) {
+  const scale = sizeMm / font.capHeight;
+  const lhUnits = lineHeightMm / scale;
+  const lsUnits = lsMm / scale;
+  const placed = [];
+  text.split("\n").forEach((line, li) => {
+    let pen = 0;
+    const base = li * lhUnits;
+    for (const ch of line) {                 // per code point → æøå safe
+      const g = font.glyphs[ch];
+      const adv = g ? g.adv : font.spaceAdvance;
+      if (g) for (const s of g.strokes)
+        placed.push(s.map(([gx, gy]) => [pen + gx, (gy - font.baseline) + base]));
+      pen += adv + lsUnits;
+    }
+  });
+  if (!placed.length) return { strokes: [], w: 0, h: 0 };
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const s of placed) for (const [x, y] of s) {
+    if (x < minx) minx = x; if (x > maxx) maxx = x;
+    if (y < miny) miny = y; if (y > maxy) maxy = y;
+  }
+  const strokes = placed.map(s => s.map(([x, y]) => [(x - minx) * scale, (y - miny) * scale]));
+  return { strokes, w: (maxx - minx) * scale, h: (maxy - miny) * scale };
+}
+
+/* ---- Chaikin corner-cutting, endpoints pinned (mirror of text2svg.chaikin) ---- */
+function chaikin(stroke, iters) {
+  let pts = stroke;
+  for (let k = 0; k < iters; k++) {
+    if (pts.length < 3) break;
+    const out = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [px, py] = pts[i], [qx, qy] = pts[i + 1];
+      out.push([0.75 * px + 0.25 * qx, 0.75 * py + 0.25 * qy]);
+      out.push([0.25 * px + 0.75 * qx, 0.25 * py + 0.75 * qy]);
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  return pts;
+}
+
+/* ---- SVG text output: same format as text2svg.to_svg() (bare polylines,
+   mm units, stroke 0.3) — drops straight into the strek plotter. Coords match
+   the Python tool to ~1 µm; the tiny delta is fonts.json rounding, not this. ---- */
+const fmt = v => v.toFixed(3).replace(/\.?0+$/, "");
+function toSvg(strokes, w, h, margin = 2) {
+  const W = w + 2 * margin, H = h + 2 * margin;
+  const L = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(W)}mm" height="${fmt(H)}mm" viewBox="0 0 ${fmt(W)} ${fmt(H)}">`,
+    '<g fill="none" stroke="black" stroke-width="0.3" stroke-linecap="round" stroke-linejoin="round">',
+  ];
+  for (const s of strokes)
+    L.push(`<polyline points="${s.map(([x, y]) => `${fmt(x + margin)},${fmt(y + margin)}`).join(" ")}"/>`);
+  L.push("</g>", "</svg>");
+  return L.join("\n") + "\n";
+}
+
+/* ---- build strokes for the current controls ---- */
+function build() {
+  const font = FONTS[$("font").value];
+  const text = $("text").value.replace(/\s+$/, "");
+  const size = Number($("size").value) || 10;
+  const ls = Number($("ls").value) || 0;
+  const lh = $("lh").value.trim() === "" ? 1.8 * size : Number($("lh").value);
+  const smooth = Math.max(0, Math.min(5, Math.round(Number($("smooth").value) || 0)));
+  if (!font || !text.trim()) return { font, empty: true };
+  let { strokes, w, h } = layout(text, font, size, lh, ls);
+  if (smooth > 0) strokes = strokes.map(s => chaikin(s, smooth));
+  const missing = [...new Set([...text].filter(c => /[æøåÆØÅ]/.test(c) && !font.glyphs[c]))];
+  return { font, text, size, strokes, w, h, missing, empty: !strokes.length };
+}
+
+/* ---- preview ---- */
+function renderPreview(r) {
+  const svg = $("preview"), empty = $("previewEmpty");
+  if (r.empty) {
+    svg.setAttribute("hidden", ""); empty.hidden = false;  // SVGElement has no .hidden IDL prop
+    empty.textContent = r.font ? "Skriv noe tekst…" : "Ingen font lastet.";
+    return;
+  }
+  const m = 2, W = r.w + 2 * m, H = r.h + 2 * m;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  svg.innerHTML =
+    `<g fill="none" stroke="currentColor" stroke-width="0.3" stroke-linecap="round" stroke-linejoin="round">` +
+    r.strokes.map(s => `<polyline points="${s.map(([x, y]) => `${(x + m).toFixed(2)},${(y + m).toFixed(2)}`).join(" ")}"/>`).join("") +
+    `</g>`;
+  svg.removeAttribute("hidden"); empty.hidden = true;
+}
+
+function refresh() {
+  if (!FONTS) return;
+  const r = build();
+  renderPreview(r);
+  const npts = r.strokes ? r.strokes.reduce((a, s) => a + s.length, 0) : 0;
+  $("sFont").textContent = $("font").value;
+  $("sSize").textContent = r.empty ? "—" : `${r.w.toFixed(0)}×${r.h.toFixed(0)} mm`;
+  $("sStrokes").textContent = r.empty ? "—" : r.strokes.length;
+  $("sPts").textContent = r.empty ? "—" : npts;
+  $("download").disabled = r.empty;
+
+  const msgs = [];
+  if (r.missing && r.missing.length)
+    msgs.push(`<div class="msg warn">Fonten «${$("font").value}» mangler ${r.missing.join("")} — de hoppes over. Bruk en EMS-font for æøå.</div>`);
+  $("messages").innerHTML = msgs.join("");
+}
+
+const slug = s => (s.toLowerCase().replace(/[^a-z0-9æøå]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "tekst");
+
+$("download").addEventListener("click", () => {
+  const r = build();
+  if (r.empty) return;
+  const svg = toSvg(r.strokes, r.w, r.h);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  a.download = `${slug(r.text.split("\n")[0])}.svg`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("fileInput").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (f) { $("text").value = (await f.text()).replace(/\s+$/, ""); refresh(); }
+  e.target.value = "";
+});
+document.querySelector(".file").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); }
+});
+
+for (const id of ["text", "font", "size", "ls", "lh", "smooth"])
+  $(id).addEventListener("input", refresh);
+
+/* ---- load glyph data ---- */
+fetch("fonts.json").then(res => {
+  if (!res.ok) throw new Error(res.status);
+  return res.json();
+}).then(data => {
+  FONTS = data;
+  const sel = $("font");
+  // EMS (æøå) first, then Hershey
+  const names = Object.keys(FONTS).sort((a, b) =>
+    (FONTS[a].fmt === "ems" ? 0 : 1) - (FONTS[b].fmt === "ems" ? 0 : 1) || a.localeCompare(b));
+  sel.innerHTML = names.map(n =>
+    `<option value="${n}">${n} — ${FONTS[n].fmt === "ems" ? "EMS script (æøå)" : "Hershey (ASCII)"}</option>`).join("");
+  refresh();
+}).catch(err => {
+  $("previewEmpty").textContent = "Klarte ikke laste fonts.json (" + err.message + ").";
+  $("messages").innerHTML = `<div class="msg stop">fonts.json mangler eller siden kjører fra file://. Server docs/ over HTTP (GitHub Pages fungerer).</div>`;
+});
+</script>
+</body>
+</html>
