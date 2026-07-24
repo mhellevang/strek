@@ -53,7 +53,7 @@ def resolve_font(name):
 
 def list_fonts():
     for d in FONT_DIRS:
-        fmt = "ems (SVG, script)" if d.name == "ems" else "hershey (.jhf)"
+        fmt = "ems (SVG)" if d.name == "ems" else "hershey (.jhf)"
         for f in sorted(d.glob("*")):
             if f.suffix.lower() in (".svg", ".jhf"):
                 print(f"  {f.stem:<18} {fmt}")

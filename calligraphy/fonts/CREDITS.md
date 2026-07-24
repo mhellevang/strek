@@ -9,14 +9,16 @@ Laboratory, 1967). Public domain. `.jhf` files via the
 [kamalmostafa/hershey-fonts](https://github.com/kamalmostafa/hershey-fonts)
 distribution.
 
-- `cursive.jhf`, `scripts.jhf`, `gothiceng.jhf`
+- Script/kalligrafi: `cursive.jhf`, `scripts.jhf`, `gothiceng.jhf`
+- Sans-serif: `futural.jhf` (enkeltstrøk), `futuram.jhf` (dobbeltstrøk), `rowmans.jhf`
+- Serif: `timesr.jhf`, `timesrb.jhf` (halvfet)
 
 Hershey fonts are ASCII-only — no `æ ø å`. For Norwegian text use an EMS font
-(all four cover `æ ø å Æ Ø Å`).
+(all six cover `æ ø å Æ Ø Å`).
 
 ## EMS (`ems/*.svg`) — SIL Open Font License 1.1
 
-Calligraphic SVG single-stroke fonts curated and SVG-converted by
+SVG single-stroke fonts curated and SVG-converted by
 Windell H. Oskay (Evil Mad Scientist / Bantam Tools), created by
 Sheldon B. Michaels, from the [oskay/svg-fonts](https://gitlab.com/oskay/svg-fonts)
 distribution. Licensed under the SIL Open Font License 1.1 — full text in
@@ -29,6 +31,8 @@ Fonts family:
 | `EMSBrush.svg`      | EMS Brush       | Alex Brush          | Rob Leuschke, TypeSETit |
 | `EMSCasualHand.svg` | EMS Casual Hand | Covered By Your Grace | Kimberly Geswein |
 | `EMSDelight.svg`    | EMS Delight     | Delius              | Natalia Raices |
+| `EMSNixish.svg`     | EMS Nixish      | Nixie One           | Jovanny Lemonad |
+| `EMSReadability.svg` | EMS Readability | Source Sans Pro Light | Paul D. Hunt, Adobe |
 
 The OFL permits bundling and redistribution; the fonts keep their Reserved
 Font Names and are not sold on their own. Full per-font metadata (author,
