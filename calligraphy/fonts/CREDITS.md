@@ -2,19 +2,21 @@
 
 Fonts vendored for the strek calligraphy toolkit (`calligraphy/text2svg.py`).
 
-## Hershey (`hershey/*.jhf`) — Public domain
+## Hershey (`hershey/*.svg`) — Hershey license (attribution)
 
-Classic single-stroke vector fonts by Dr. Allen V. Hershey (US Naval Weapons
-Laboratory, 1967). Public domain. `.jhf` files via the
-[kamalmostafa/hershey-fonts](https://github.com/kamalmostafa/hershey-fonts)
-distribution.
+Classic single-stroke vector fonts by Dr. Allen V. Hershey (US National
+Bureau of Standards, 1967), extended with Latin-1 glyphs (incl. `æ ø å Æ Ø Å`)
+and converted to SVG fonts in 2019 by Windell H. Oskay, from the
+[oskay/svg-fonts](https://gitlab.com/oskay/svg-fonts) distribution.
+License: free for any use with attribution — full text in each `.svg` file.
+Required acknowledgements: the Hershey Fonts were originally created by
+Dr. A. V. Hershey while working at the U.S. National Bureau of Standards;
+the original font data format was created by James Hurt (Cognition, Inc.).
 
-- Script/kalligrafi: `cursive.jhf`, `scripts.jhf`, `gothiceng.jhf`
-- Sans-serif: `futural.jhf` (enkeltstrøk), `futuram.jhf` (dobbeltstrøk), `rowmans.jhf`
-- Serif: `timesr.jhf`, `timesrb.jhf` (halvfet)
-
-Hershey fonts are ASCII-only — no `æ ø å`. For Norwegian text use an EMS font
-(all six cover `æ ø å Æ Ø Å`).
+- Sans-serif: `HersheySans1.svg` (enkeltstrøk), `HersheySansMed.svg`
+- Serif: `HersheySerifMed.svg`, `HersheySerifBold.svg`
+- Script: `HersheyScript1.svg`, `HersheyScriptMed.svg`
+- Gotisk: `HersheyGothEnglish.svg`
 
 ## EMS (`ems/*.svg`) — SIL Open Font License 1.1
 

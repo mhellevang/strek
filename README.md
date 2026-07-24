@@ -251,19 +251,19 @@ strokes. Three techniques, happily combined:
 1. **Single-stroke fonts (Hershey)** — every letter is one pen path. Our
    own [`calligraphy/text2svg.py`](calligraphy/text2svg.py) does this with
    no Inkscape: text in → single-stroke SVG out, ready for the pipeline.
-   Ships with calligraphic EMS script fonts (Allure, Delight, Casual Hand,
-   Brush) and classic Hershey (`cursive`, `scripts`, `gothiceng` — the
-   1960s-pen look):
+   Ships with EMS fonts (script: Allure, Delight, Casual Hand, Brush;
+   sans: Readability, Nixish) and classic Hershey in sans, serif, script
+   and gothic (the 1960s-pen look) — all 13 with full `æøå` coverage:
 
    ```
    python3 calligraphy/text2svg.py "Hei Strek" --font EMSAllure --size 14
-   python3 calligraphy/text2svg.py dikt.txt --font cursive -o dikt.svg
+   python3 calligraphy/text2svg.py dikt.txt --font HersheyScript1 -o dikt.svg
    python3 calligraphy/text2svg.py --list-fonts
    ```
 
-   The EMS fonts are stored as coarse polylines, so a Chaikin `--smooth`
+   The fonts are stored as coarse polylines, so a Chaikin `--smooth`
    pass (default 2) rounds them into flowing script; use `--smooth 0` to
-   keep the sharp corners of `gothiceng`. `--size` is the cap-height in mm;
+   keep the sharp corners of `HersheyGothEnglish`. `--size` is the cap-height in mm;
    the toolkit stays paper-agnostic and lets `svg2gcode.py` place the text
    (see
    [ADR 0001](docs/adr/0001-calligraphy-toolkit-is-paper-agnostic.md)).

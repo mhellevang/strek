@@ -99,7 +99,7 @@ def font_cards(phrase):
         if SMOOTH > 0:
             strokes = [t2s.chaikin(s, SMOOTH) for s in strokes]
         svg = render_inline_svg(strokes, w, h)
-        fmt_label = "EMS · script (SVG)" if font.fmt == "ems" else "Hershey (.jhf)"
+        fmt_label = "Hershey" if font.name.startswith("Hershey") else "EMS"
         npts = sum(len(s) for s in strokes)
         badge = ""
         if missing:

@@ -11,7 +11,7 @@ docs/adr/0001-calligraphy-toolkit-is-paper-agnostic.md).
 
 Examples:
   python3 calligraphy/text2svg.py "hei" --font EMSAllure --size 14
-  python3 calligraphy/text2svg.py --font cursive dikt.txt -o out.svg
+  python3 calligraphy/text2svg.py --font HersheyScript1 dikt.txt -o out.svg
   echo "flere\nlinjer" | python3 calligraphy/text2svg.py --font EMSDelight -
 """
 
@@ -53,10 +53,9 @@ def resolve_font(name):
 
 def list_fonts():
     for d in FONT_DIRS:
-        fmt = "ems (SVG)" if d.name == "ems" else "hershey (.jhf)"
         for f in sorted(d.glob("*")):
             if f.suffix.lower() in (".svg", ".jhf"):
-                print(f"  {f.stem:<18} {fmt}")
+                print(f"  {f.stem:<22} {d.name}")
 
 
 # --------------------------------------------------------------------------

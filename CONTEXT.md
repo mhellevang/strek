@@ -23,9 +23,9 @@ font parsers and the layout engine — parser-agnostic.
 ### Font (in the toolkit)
 A named collection of Glyphs loaded from a source file. Two source formats
 are supported, each with its own parser, both producing the same Glyph
-model: **EMS SVG fonts** (calligraphic script) and **classic Hershey
-`.jhf`** (public-domain engraved/gothic — the "1960s pen" look). Layout and
-rendering never know which format a Font came from.
+model: **SVG fonts** (EMS + Latin-1-extended Hershey, all with `æøå`) and
+**classic Hershey `.jhf`** (ASCII-only; parser kept, no files vendored).
+Layout and rendering never know which format a Font came from.
 
 ### Layout engine
 Places Glyphs into lines to produce the final Single-stroke SVG. Format-
