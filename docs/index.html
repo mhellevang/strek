@@ -645,7 +645,7 @@ function gcode(nozzleLayers, p, srcName) {
   L.push(
     `G0 Z${zClear.toFixed(1)} F${fZ}`,
     `G0 X${park[0]} Y240 F${fTravel} ; head to the back — remove sheet/pen`,
-    "M400",
+    "M400 U1 ; PAUSE: remove the pen before continuing",
     "M73 P100",
     "; done", "");
   return { text: L.join("\n"), drawLen, travelLen, seconds: total };

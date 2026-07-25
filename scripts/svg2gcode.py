@@ -34,8 +34,8 @@ in, plot the cross, measure the deviation on the sheet and adjust
 
 Usage:
   python3 scripts/svg2gcode.py --calibrate                  # cross at paper center
-  python3 scripts/svg2gcode.py file.svg                     # A4 sheet
-  python3 scripts/svg2gcode.py file.svg --paper a5          # A5 landscape
+  python3 scripts/svg2gcode.py file.svg                     # A5 landscape
+  python3 scripts/svg2gcode.py file.svg --paper 210x200     # cut A4
   python3 scripts/svg2gcode.py file.svg --z-draw 17.3 --pen-dx -27
 """
 
@@ -302,7 +302,7 @@ def generate(paths, args):
     lines += [
         f"G0 Z{z_up + 30:.1f} F{f_z}",
         f"G0 X{park_x:.0f} Y240 F{f_travel} ; head to the back — remove sheet/pen",
-        "M400",
+        "M400 U1 ; PAUSE: remove the pen before continuing",
         "M73 P100",
         "; done",
     ]
@@ -313,9 +313,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("svg", type=Path, nargs="?", help="vpype-optimized SVG")
     ap.add_argument("-o", "--out", type=Path, help="output file (.gcode)")
-    ap.add_argument("--paper", default="a4",
+    ap.add_argument("--paper", default="a5",
                     help="paper size: a4, a5 (=210x148 landscape) or WxH in mm "
-                         "(default a4). The sheet is assumed to sit in the "
+                         "(default a5). The sheet is assumed to sit in the "
                          "alignment jig: 29 mm from the right wall, 41 mm from "
                          "the back wall")
     ap.add_argument("--pen-dx", type=float, default=-29.0,

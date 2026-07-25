@@ -40,7 +40,7 @@ Workflow per plot:
       for pens, POSCA module for thick markers; a cutter module exists
       too) — regular print jobs with Falu's profiles. Spring-loaded,
       clips onto the printhead, tool change in seconds, ±0.1 mm
-- [ ] Print the paper jig ([jig/paper_jig.stl](jig/paper_jig.scad)) —
+- [ ] Print the paper jig ([jig/paper_jig.stl](jig/paper_jig.stl)) —
       an L-bracket that hooks onto the plate's back/right edges and
       gives the margins (29 mm right / 41 mm back) automatically.
       MEASURE `edge_to_bed`/`lip_drop`/the pin positions in the .scad
