@@ -4,14 +4,14 @@
 a Bambu Lab P2S acting as a pen plotter via **UMTS** —
 [Universal Modular Tool System by Falu](https://makerworld.com/en/models/2029113-modular-system-for-a1-p1-x1-series)
 (free, MakerWorld, P2S in the profile list). Zero new parts beyond
-printed modules. G-code comes from our **own pipeline** — vsketch/SVG →
-[scripts/optimize.sh](scripts/optimize.sh) →
-[scripts/svg2gcode.py](scripts/svg2gcode.py) or the
-**[web app](https://mhellevang.github.io/strek/)** — no slicer; the Orca
-setup remains as a [fallback](#fallback-orca-slicer) at the end of the
-setup chapter. A dedicated plotter is postponed until the hobby has
-proven itself; if it happens, the plan is to **buy** (iDraw 2.0), not
-build — see [Plan B](#plan-b--dedicated-machine) at the bottom.
+printed modules. The **[web app](https://mhellevang.github.io/strek/)**
+is the main interface: drop in an SVG, preview the toolpath and download
+ready-to-run G-code. It works offline and needs no slicer.
+[scripts/svg2gcode.py](scripts/svg2gcode.py) remains available for
+command-line use. The Orca setup is a [fallback](#fallback-orca-slicer).
+A dedicated plotter is postponed until the hobby has proven itself; if
+it happens, the plan is to **buy** (iDraw 2.0), not build — see
+[Plan B](#plan-b--dedicated-machine) at the bottom.
 
 ## P2S as a plotter (UMTS) — setup
 
@@ -19,20 +19,18 @@ Workflow per plot:
 
 1. Make/get an SVG (sketches in [sketches/](sketches/), the handwriting
    toolkit below, Inkscape, Convertio for image-to-line-art)
-2. Optimize: `./scripts/optimize.sh file.svg` (vpype linemerge +
-   linesort — cuts plot time drastically)
-3. Generate G-code — either in the
-   **[web app](https://mhellevang.github.io/strek/)** (drag in the SVG,
-   preview the toolpath on the bed, download `.gcode`; also accepts raw
-   SVGs with paths/transforms) or on the command line:
-   `python3 scripts/svg2gcode.py file.svg --paper a5`
-4. Transfer to the printer: microSD, or FTP over LAN
+2. Open the **[web app](https://mhellevang.github.io/strek/)**, drop in
+   the SVG, preview the toolpath and download the `.gcode`
+3. Transfer to the printer: microSD, or FTP over LAN
    (`ftps://<printer-ip>`, port 990, user `bblp` + access code from the
    screen). Start from the printer screen — the P2S runs raw `.gcode`
    (confirmed)
-5. Put the sheet in the jig, tape the two free corners. The file homes
+4. Put the sheet in the jig, tape the two free corners. The file homes
    first (**without** the pen), parks and pauses (`M400 U1`) — mount the
    pen, press resume. Stay at the machine
+
+For complex SVGs, [scripts/optimize.sh](scripts/optimize.sh) can merge
+and sort paths before they are opened in the web app.
 
 ### Checklist: first-time setup
 
@@ -49,57 +47,59 @@ Workflow per plot:
       every plot
 - [ ] Top glass off, or riser on (spring travel)
 - [ ] Calibrate in phases (see [safety rules](#safety-rules-from-the-umts-designer--general)):
-  - [ ] `svg2gcode.py --calibrate` (or the web app's calibration cross)
+  - [ ] Generate a calibration cross in the web app and run it
         **without the pen** — just watch that moves, pauses and
         clearances look right (the nozzle stays 17+ mm above the plate,
         harmless)
   - [ ] Same file with the pen: the cross should sit at the paper's
         center (arrow toward the back wall). Measure the deviation,
-        adjust `--pen-dx`/`--pen-dy` (instructions in the output)
+        adjust the pen X/Y offsets
   - [ ] Pen pressure: start too high, adjust the pen depth in the module
-        (or `--z-draw` in 0.1 steps) until it draws cleanly and lifts
-        clearly
+        or Z draw in 0.1 steps until it draws cleanly and lifts clearly
 - [ ] First real plot: BIC/Stabilo in the module AFTER homing, ~0.5 mm
       tip protrusion, stand by the pause button
 
-### Generating G-code: web app / svg2gcode.py
+### Web app
 
 The **[web app](https://mhellevang.github.io/strek/)** ([docs/](docs/) —
-also works opened straight from disk, fully offline): drag in an SVG, preview the toolpath on
-the bed (paper, keep-out zone, travel moves), tune parameters, download
-`.gcode`. It accepts raw SVGs too — paths, shapes and transforms are
-flattened natively by the browser.
-
-[scripts/svg2gcode.py](scripts/svg2gcode.py) is the same generator as a
-CLI (vpype-flattened SVGs only — no slicer, no flow-0.01 hack):
-
-```sh
-python3 scripts/svg2gcode.py --calibrate          # first-time cross plot
-python3 scripts/svg2gcode.py sketches/output/optimized/circle_packing.svg \
-  --paper a5 -o sketches/output/gcode/circle_packing.gcode
-```
+also works opened straight from disk, fully offline): drag in one or
+more SVGs, preview the toolpath on the bed, tune the parameters and
+download `.gcode`. Raw paths, shapes and transforms are flattened by
+the browser. Multiple files become pen layers with pauses for swapping
+pens.
 
 - Pure pen logic: XY moves along the strokes, 3 mm Z lift between them,
   no E axis — heaters are actively turned OFF (M104/M140 S0). Built-in
   safety: refuses nozzle coordinates outside the legal window
   (X 48–255, Y 55–255), Z floor 16 mm, scales down designs that don't fit
-- **Centers on the sheet**, not just in the legal window: `--paper
-  a4|a5|WxH` (the sheet is assumed to sit in the jig) + the pen tip's
-  offset from the nozzle (`--pen-dx`/`--pen-dy`, assumed −29/−41 from
-  the jig margins). The output lists the drawing's margins on the sheet
-  — on A4 the pen can't reach the bottom ~80 mm; the script shifts the
+- **Centers on the sheet**, not just in the legal window: choose A4,
+  A5 or a custom size and set the pen tip's X/Y offset from the nozzle
+  (initially −29/−41 from the jig margins). The preview shows the
+  drawing's margins on the sheet
+  — on A4 the pen can't reach the bottom ~80 mm; the app shifts the
   drawing and says so
-- **Calibrate once:** `--calibrate` plots a cross that should sit at the
-  paper's center (arrow pointing toward the back wall). Measure the
-  deviation and adjust `--pen-dx`/`--pen-dy`. Then `--z-draw` (default
-  17.1) in 0.1 steps until the pen barely draws; `--draw-speed` default
-  150 mm/s (Stabilo takes 300–400)
+- **Calibrate once:** generate a cross that should sit at the paper's
+  center (arrow pointing toward the back wall). Measure the deviation
+  and adjust the pen X/Y offsets. Then adjust Z draw (default 17.1) in
+  0.1 steps until the pen barely draws. Draw speed defaults to 150 mm/s
+  (Stabilo takes 300–400)
 - Flow inside the file: `G28` (home **without** pen) → parks near the
   front → `M400 U1` (pause) → mount pen, resume → plots with M73
   progress on the screen → parks at the back
-- **NB multicolor/multiple files: take the pen OUT before every new
-  file** — each file starts with G28, and Z-homing with the pen mounted
-  gives a wrong Z reference for the whole layer
+- **Multicolor:** load the SVGs together and the app creates one job
+  with pauses between the pen layers. If you run separate G-code files,
+  take the pen out before each file because every job starts with G28
+
+#### CLI (advanced/local use)
+
+[scripts/svg2gcode.py](scripts/svg2gcode.py) provides the same G-code
+flow for automation and local use. It requires vpype-flattened SVGs.
+
+```sh
+python3 scripts/svg2gcode.py --calibrate
+python3 scripts/svg2gcode.py sketches/output/optimized/circle_packing.svg \
+  --paper a5 -o sketches/output/gcode/circle_packing.gcode
+```
 
 ### Mechanics
 
@@ -334,9 +334,9 @@ Genres to explore:
   | `differential_growth.py` | Organic curve growth with snapshots | 1 |
 - [vpype](https://github.com/abey79/vpype) — post-processing: merge
   lines, sort paths, cuts plot time drastically.
-  Run [scripts/optimize.sh](scripts/optimize.sh) on all SVGs before
-  svg2gcode (uses `uvx vpype` automatically; the CLI script requires
-  vpype-flattened SVGs without `<path>` — the web app doesn't)
+  [scripts/optimize.sh](scripts/optimize.sh) uses `uvx vpype`
+  automatically. It is optional before the web app and required before
+  the CLI
 - [DrawingBotV3](https://drawingbotv3.com) /
   [StippleGen](https://wiki.evilmadscientist.com/StippleGen) — GUI,
   zero code
@@ -355,11 +355,11 @@ Genres to explore:
 3. **Per pen**: stroke width 0.4 mm (Point 88), distribution weight if
    one color dominates, opacity ~0.8 in the preview simulates marker
    overlap
-4. **Export**: File → **Export per/pen** → SVG, one file per color. Run
-   each through `scripts/optimize.sh` and svg2gcode / the web app
-5. **Plotting**: file by file, swap pens between layers, don't move the
-   paper. Order light → dark — dark strokes hide registration errors.
-   Take the pen out before every new file (G28 homing)
+4. **Export**: File → **Export per/pen** → SVG, one file per color. Open
+   all files together in the web app
+5. **Plotting**: run the combined G-code and swap pens at each pause
+   without moving the paper. Order the files light → dark — dark strokes
+   hide registration errors
 
 ## Pens
 
