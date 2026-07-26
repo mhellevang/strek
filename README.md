@@ -1,17 +1,28 @@
-# strek — pen plotting and calligraphy
+# strek
 
-**Main direction (2026-07-17):** plot calligraphy and generative art with
-a Bambu Lab P2S acting as a pen plotter via **UMTS** —
-[Universal Modular Tool System by Falu](https://makerworld.com/en/models/2029113-modular-system-for-a1-p1-x1-series)
-(free, MakerWorld, P2S in the profile list). Zero new parts beyond
-printed modules. The **[web app](https://mhellevang.github.io/strek/)**
-is the main interface: drop in an SVG, preview the toolpath and download
-ready-to-run G-code. It works offline and needs no slicer.
-[scripts/svg2gcode.py](scripts/svg2gcode.py) remains available for
-command-line use. The Orca setup is a [fallback](#fallback-orca-slicer).
-A dedicated plotter is postponed until the hobby has proven itself; if
-it happens, the plan is to **buy** (iDraw 2.0), not build — see
-[Plan B](#plan-b--dedicated-machine) at the bottom.
+Pen plotting with a Bambu Lab P2S 3D printer: a web app that converts
+SVG to plotter G-code, a script that turns text into single-stroke SVG
+for calligraphy, some generative-art sketches, and a printable jig that
+holds the paper on the bed.
+
+The pen sits in
+[UMTS](https://makerworld.com/en/models/2029113-modular-system-for-a1-p1-x1-series)
+(Universal Modular Tool System by Falu) — a free, printable,
+spring-loaded module that clips onto the printhead; no printer
+modifications. The flow is SVG →
+[web app](https://mhellevang.github.io/strek/) → `.gcode` → the printer
+draws it. No slicer involved.
+
+## What's in this repo
+
+| Directory | What |
+|---|---|
+| [docs/](docs/) | The web app ([live on Pages](https://mhellevang.github.io/strek/)) — drop in SVGs, preview the toolpath, download G-code. Works opened straight from disk |
+| [calligraphy/](calligraphy/) | `text2svg.py` — text → single-stroke SVG, 13 Hershey/EMS fonts with full `æøå` |
+| [sketches/](sketches/) | 10 generative-art sketches (flow fields, truchet, hilbert, …) for [vsketch](https://github.com/abey79/vsketch) |
+| [scripts/](scripts/) | `svg2gcode.py` (CLI version of the web app's G-code pipeline), `optimize.sh` (vpype path merge/sort) |
+| [jig/](jig/) | Self-registering paper jig, OpenSCAD + STL |
+| [arkiv/](arkiv/) | A shelved DIY-plotter build (kept for reference; [Plan B](#plan-b--dedicated-machine) is to buy an iDraw 2.0 instead) |
 
 ## P2S as a plotter (UMTS) — setup
 
@@ -32,32 +43,32 @@ Workflow per plot:
 For complex SVGs, [scripts/optimize.sh](scripts/optimize.sh) can merge
 and sort paths before they are opened in the web app.
 
-### Checklist: first-time setup
+### First-time setup
 
-- [ ] Print the UMTS modules from the MakerWorld profile (Stabilo module
-      for pens, POSCA module for thick markers; a cutter module exists
-      too) — regular print jobs with Falu's profiles. Spring-loaded,
-      clips onto the printhead, tool change in seconds, ±0.1 mm
-- [ ] Print the paper jig ([jig/paper_jig.stl](jig/paper_jig.stl)) —
-      an L-bracket that hooks onto the plate's back/right edges and
-      gives the margins (29 mm right / 41 mm back) automatically.
-      MEASURE `edge_to_bed`/`lip_drop`/the pin positions in the .scad
-      file against your plate before printing
-- [ ] Masking tape ready — the sheet's two free corners are taped before
-      every plot
-- [ ] Top glass off, or riser on (spring travel)
-- [ ] Calibrate in phases (see [safety rules](#safety-rules-from-the-umts-designer--general)):
-  - [ ] Generate a calibration cross in the web app and run it
-        **without the pen** — just watch that moves, pauses and
-        clearances look right (the nozzle stays 17+ mm above the plate,
-        harmless)
-  - [ ] Same file with the pen: the cross should sit at the paper's
-        center (arrow toward the back wall). Measure the deviation,
-        adjust the pen X/Y offsets
-  - [ ] Pen pressure: start too high, adjust the pen depth in the module
-        or Z draw in 0.1 steps until it draws cleanly and lifts clearly
-- [ ] First real plot: BIC/Stabilo in the module AFTER homing, ~0.5 mm
-      tip protrusion, stand by the pause button
+1. Print the UMTS modules from the MakerWorld profile (Stabilo module
+   for pens, POSCA module for thick markers; a cutter module exists
+   too) — regular print jobs with Falu's profiles. Spring-loaded,
+   clips onto the printhead, tool change in seconds, ±0.1 mm
+2. Print the paper jig ([jig/paper_jig.stl](jig/paper_jig.stl)) —
+   an L-bracket that hooks onto the plate's back/right edges and
+   gives the margins (29 mm right / 41 mm back) automatically.
+   MEASURE `edge_to_bed`/`lip_drop`/the pin positions in the .scad
+   file against your plate before printing
+3. Have masking tape ready — the sheet's two free corners are taped
+   before every plot
+4. Top glass off, or riser on (spring travel)
+5. Calibrate in phases (see [safety rules](#safety-rules-from-the-umts-designer--general)):
+   1. Generate a calibration cross in the web app and run it
+      **without the pen** — just watch that moves, pauses and
+      clearances look right (the nozzle stays 17+ mm above the plate,
+      harmless)
+   2. Same file with the pen: the cross should sit at the paper's
+      center (arrow toward the back wall). Measure the deviation,
+      adjust the pen X/Y offsets
+   3. Pen pressure: start too high, adjust the pen depth in the module
+      or Z draw in 0.1 steps until it draws cleanly and lifts clearly
+6. First real plot: BIC/Stabilo in the module AFTER homing, ~0.5 mm
+   tip protrusion, stand by the pause button
 
 ### Web app
 
