@@ -282,10 +282,13 @@ strokes. Three techniques, happily combined:
    Other options: 3dplotter.xyz has 50+ built in; Inkscape has the Hershey
    Text extension; `vpype text` from the command line
 
-   For NN-generated handwriting there is
-   [`calligraphy/nn_text2svg.py`](calligraphy/nn_text2svg.py) — a Graves
-   RNN with programmatic `æøå` (attention-placed diacritics, auto-resample
-   on skipped letters). Requires
+   For NN-generated handwriting, pick **Håndskrift — NN** in the web
+   app's [text tool](https://mhellevang.github.io/strek/text.html) — the
+   Graves RNN runs in the browser (onnxruntime-web, 28 MB lazy-loaded and
+   cached) with programmatic `æøå` (attention-placed diacritics,
+   auto-resample on skipped letters) and a neatness slider. The CLI
+   original is [`calligraphy/nn_text2svg.py`](calligraphy/nn_text2svg.py);
+   it requires
    [pytorch-handwriting-synthesis-toolkit](https://github.com/X-rayLaser/pytorch-handwriting-synthesis-toolkit)
    cloned to `~/git` with a `venv/` (torch 1.x) and the pretrained
    `checkpoints/Epoch_56`; the script re-execs into that venv by itself:

@@ -102,6 +102,17 @@
         <div class="row"><div class="field"><select id="font"></select></div></div>
       </fieldset>
 
+      <fieldset id="nnFields" hidden>
+        <legend class="microlabel">NN-håndskrift</legend>
+        <div class="row">
+          <div class="field"><label for="bias">Ryddighet <span id="biasVal">0.8</span></label>
+            <input type="range" id="bias" min="0.2" max="2" step="0.1" value="0.8" style="width:100%"></div>
+          <div class="field" style="align-self:end"><button id="reroll" type="button" style="width:100%">Ny variant</button></div>
+        </div>
+        <p class="hint">Nevralt nett skriver teksten for hånd — hver variant er unik.
+          Æøå tegnes programmatisk. Modellen (28 MB) lastes første gang og caches.</p>
+      </fieldset>
+
       <fieldset>
         <legend class="microlabel">Geometri</legend>
         <div class="row">
@@ -207,8 +218,83 @@ function toSvg(strokes, w, h, margin = 2) {
   return L.join("\n") + "\n";
 }
 
+/* ---- NN handwriting mode (nn/handwriting.js, lazy-loaded) ---- */
+const isNN = () => $("font").value === "__nn__";
+let NN = null;                                  // {synth, toSvg} once loaded
+let nnKey = "", nnResult = null, nnSeq = 0, nnRoll = 0, nnTimer = 0;
+
+async function ensureNN() {
+  if (NN) return NN;
+  await new Promise((ok, err) => {
+    const s = document.createElement("script");
+    s.src = "nn/vendor/ort.wasm.min.js";
+    s.onload = ok; s.onerror = () => err(new Error("klarte ikke laste onnxruntime"));
+    document.head.appendChild(s);
+  });
+  const mod = await import("./nn/handwriting.js");
+  const synth = await mod.loadSynthesizer();
+  NN = { synth, toSvg: mod.toSvg };
+  return NN;
+}
+
+async function nnGenerate() {
+  const text = $("text").value.trim();
+  const size = Number($("size").value) || 10;
+  const lh = $("lh").value.trim() === "" ? 1.8 * size : Number($("lh").value);
+  const bias = Number($("bias").value);
+  const key = JSON.stringify([text, size, lh, bias, nnRoll]);
+  if (!text) { nnResult = null; nnKey = key; renderNN(); return; }
+  if (key === nnKey) { renderNN(); return; }
+
+  const seq = ++nnSeq;
+  $("previewEmpty").hidden = false;
+  $("previewEmpty").textContent = NN ? "Skriver…" : "Laster modell (28 MB første gang)…";
+  $("messages").innerHTML = "";
+  try {
+    const { synth } = await ensureNN();
+    const lines = text.split("\n").map(s => s.trim()).filter(Boolean);
+    const strokes = [];
+    let wMax = 0;
+    for (const [i, line] of lines.entries()) {
+      const polys = await synth.synthesize(line, { bias });
+      if (seq !== nnSeq) return;                // stale — newer request underway
+      // scale this line's ink to `size` mm tall, stack at i*lh
+      const pts = polys.flat();
+      const x0 = Math.min(...pts.map(p => p[0])), y0 = Math.min(...pts.map(p => p[1]));
+      const sc = size / (Math.max(...pts.map(p => p[1])) - y0);
+      for (const poly of polys)
+        strokes.push(poly.map(([x, y]) => [(x - x0) * sc, (y - y0) * sc + i * lh]));
+      wMax = Math.max(wMax, Math.max(...polys.flat().map(p => (p[0] - x0) * sc)));
+    }
+    const dropped = [...new Set([...lines.join("")].filter(ch =>
+      !NN.synth.meta.charset.includes(ch) && !"æøåÆØÅ".includes(ch) && ch !== " "))];
+    nnResult = { text, strokes, w: wMax, h: (lines.length - 1) * lh + size,
+                 empty: !strokes.length, dropped };
+    nnKey = key;
+  } catch (e) {
+    if (seq !== nnSeq) return;
+    nnResult = null; nnKey = key;
+    $("messages").innerHTML = `<div class="msg stop">NN-håndskrift feilet: ${e.message}. Krever HTTP (ikke file://).</div>`;
+  }
+  renderNN();
+}
+
+function renderNN() {
+  const r = nnResult ?? { empty: true, font: true };
+  renderPreview(r);
+  $("sFont").textContent = "NN håndskrift";
+  $("sSize").textContent = r.empty ? "—" : `${r.w.toFixed(0)}×${r.h.toFixed(0)} mm`;
+  $("sStrokes").textContent = r.empty ? "—" : r.strokes.length;
+  $("sPts").textContent = r.empty ? "—" : r.strokes.reduce((a, s) => a + s.length, 0);
+  $("download").disabled = r.empty;
+  $("toPlotter").disabled = r.empty;
+  if (r.dropped?.length)
+    $("messages").innerHTML = `<div class="msg warn">Modellen kan ikke ${r.dropped.join(" ")} — hoppes over.</div>`;
+}
+
 /* ---- build strokes for the current controls ---- */
 function build() {
+  if (isNN()) return nnResult ?? { empty: true };
   const font = FONTS[$("font").value];
   const text = $("text").value.replace(/\s+$/, "");
   const size = Number($("size").value) || 10;
@@ -241,6 +327,12 @@ function renderPreview(r) {
 }
 
 function refresh() {
+  $("nnFields").hidden = !isNN();
+  if (isNN()) {                       // async + debounced — generation costs ~1 s
+    clearTimeout(nnTimer);
+    nnTimer = setTimeout(nnGenerate, 400);
+    return;
+  }
   if (!FONTS) return;
   const r = build();
   renderPreview(r);
@@ -295,8 +387,11 @@ document.querySelector(".file").addEventListener("keydown", e => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); }
 });
 
-for (const id of ["text", "font", "size", "ls", "lh", "smooth"])
+for (const id of ["text", "font", "size", "ls", "lh", "smooth", "bias"])
   $(id).addEventListener("input", refresh);
+$("font").addEventListener("change", refresh);
+$("bias").addEventListener("input", () => { $("biasVal").textContent = $("bias").value; });
+$("reroll").addEventListener("click", () => { nnRoll++; refresh(); });
 
 /* ---- load glyph data ---- */
 fetch("fonts.json").then(res => {
@@ -308,12 +403,14 @@ fetch("fonts.json").then(res => {
   // EMS (æøå) first, then Hershey
   const names = Object.keys(FONTS).sort((a, b) =>
     (FONTS[a].fmt === "ems" ? 0 : 1) - (FONTS[b].fmt === "ems" ? 0 : 1) || a.localeCompare(b));
-  sel.innerHTML = names.map(n =>
+  sel.innerHTML = `<option value="__nn__">Håndskrift — NN (æøå)</option>` + names.map(n =>
     `<option value="${n}">${n} — ${FONTS[n].fmt === "ems" ? "EMS script (æøå)" : "Hershey (ASCII)"}</option>`).join("");
+  sel.value = names[0];
   refresh();
 }).catch(err => {
   $("previewEmpty").textContent = "Klarte ikke laste fonts.json (" + err.message + ").";
   $("messages").innerHTML = `<div class="msg stop">fonts.json mangler eller siden kjører fra file://. Server docs/ over HTTP (GitHub Pages fungerer).</div>`;
+  $("font").innerHTML = `<option value="__nn__">Håndskrift — NN (æøå)</option>`;  // NN virker uten fonts.json
 });
 </script>
 </body>

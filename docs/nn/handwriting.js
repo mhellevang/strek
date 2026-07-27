@@ -14,13 +14,36 @@ const SUBSTITUTIONS = {
   "å": ["a", "ring", false], "Å": ["A", "ring", true],
 };
 
+// GitHub Pages sends max-age=600, so without this the 28 MB would re-download
+// every visit; Cache Storage makes it once per device.
+async function cachedFetch(url) {
+  const fresh = async () => new Uint8Array(await (await fetch(url)).arrayBuffer());
+  try {
+    const cache = await caches.open("strek-nn-v1");
+    let res = await cache.match(url);
+    if (!res) {
+      res = await fetch(url);
+      if (!res.ok) throw new Error(`${res.status} for ${url}`);
+      await cache.put(url, res.clone());
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  } catch (e) {
+    if (e.message?.includes(" for ")) throw e;
+    return fresh(); // no Cache Storage (private mode etc.)
+  }
+}
+
 export async function loadSynthesizer(opts = {}) {
   const ort = opts.ort ?? globalThis.ort;
   const base = opts.base ?? new URL(".", import.meta.url).href;
-  if (!opts.ort) ort.env.wasm.wasmPaths = base + "vendor/";
+  if (!opts.ort) {
+    ort.env.wasm.wasmPaths = base + "vendor/";
+    ort.env.wasm.wasmBinary =
+      (await cachedFetch(base + "vendor/ort-wasm-simd-threaded.wasm")).buffer;
+  }
   const meta = opts.meta ?? await (await fetch(base + "meta.json")).json();
   const session = await ort.InferenceSession.create(
-    opts.model ?? base + "synthesis.onnx");
+    opts.model ?? await cachedFetch(base + "synthesis.onnx"));
   return new Synthesizer(ort, session, meta);
 }
 
