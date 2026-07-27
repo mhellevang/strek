@@ -10,14 +10,14 @@ out as machine-perfect against the RNN's writing.
 Output matches text2svg.py: mm units, polylines, stroke-width 0.3, no background.
 Feeds straight into scripts/svg2gcode.py or the web app.
 
-Must run with the toolkit's venv python (torch 1.x):
-  ~/git/pytorch-handwriting-synthesis-toolkit/venv/bin/python \
-      calligraphy/nn_text2svg.py "Blåbærsyltetøy på brød" --bias 0.8 --trials 5
+Run with any python — re-execs itself with the toolkit's venv (torch 1.x):
+  python3 calligraphy/nn_text2svg.py "Blåbærsyltetøy på brød" --bias 0.8 --trials 5
 
 See docs/research/nn-handwriting-aeoeaa.md for background.
 """
 import argparse
 import math
+import os
 import random
 import re
 import sys
@@ -26,7 +26,14 @@ from pathlib import Path
 TOOLKIT = Path.home() / "git" / "pytorch-handwriting-synthesis-toolkit"
 sys.path.insert(0, str(TOOLKIT))
 
-import torch  # noqa: E402
+try:
+    import torch  # noqa: E402
+except ModuleNotFoundError:  # wrong python — re-exec with the toolkit's venv
+    VENV_PY = TOOLKIT / "venv" / "bin" / "python"
+    if not VENV_PY.exists():
+        sys.exit(f"trenger toolkit-venv: {VENV_PY} finnes ikke "
+                 f"(klon X-rayLaser/pytorch-handwriting-synthesis-toolkit til ~/git)")
+    os.execv(str(VENV_PY), [str(VENV_PY), *sys.argv])
 from handwriting_synthesis.sampling import HandwritingSynthesizer  # noqa: E402
 from handwriting_synthesis.utils import split_into_components, get_strokes  # noqa: E402
 
@@ -105,14 +112,15 @@ def squeeze_ligature(xs, ys, phi, a_index):
         xs[t] -= delta * f
 
 
-def ring_points(bbox, upper=False, n=24):
-    """Hand-drawn-ish ring: wobbly radius, random start, slight overshoot."""
-    x0, y0, x1, y1 = bbox
-    h = y1 - y0
-    # bbox of a capital spans the full cap height, so shrink the ratios
-    r = (0.14 if upper else 0.28) * h
-    cx = (x0 + x1) / 2 + _rng.uniform(-0.04, 0.04) * h
-    cy = y0 - r - (0.10 if upper else 0.30) * h  # above (screen coords: smaller y = up)
+def ring_points(cx, cy, rc, upper=False, n=24):
+    """Hand-drawn-ish ring: wobbly radius, random start, slight overshoot.
+
+    rc is the letter-body radius from char_center_radius; the MAD estimate
+    runs low on a capital's full height, so its gap ratio compensates.
+    """
+    r = (0.40 if upper else 0.55) * rc
+    cx += _rng.uniform(-0.08, 0.08) * rc
+    cy = cy - rc - (1.0 if upper else 0.6) * rc - r  # above the body (screen coords: smaller y = up)
     start = _rng.uniform(0, 2 * math.pi)
     sweep = 2 * math.pi * _rng.uniform(1.02, 1.12)
     w_phase = _rng.uniform(0, 2 * math.pi)
@@ -124,14 +132,21 @@ def ring_points(bbox, upper=False, n=24):
     return pts
 
 
-def slash_points(bbox):
-    """Hand-drawn-ish slash: slightly bowed, jittered endpoints."""
-    x0, y0, x1, y1 = bbox
-    h, w = y1 - y0, x1 - x0
-    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    # 'o' is roughly round; clamp width so attention smear can't stretch the slash
-    dx, dy = min(0.6 * w, 0.55 * h), 0.75 * h  # lower-left to upper-right
-    j = 0.05 * h
+def char_center_radius(xs, ys, phi, char_index):
+    """Median centre + MAD radius — robust to attention smearing onto tall neighbours."""
+    idx = char_indices(phi, char_index)
+    px = sorted(xs[i] for i in idx)
+    py = sorted(ys[i] for i in idx)
+    cx, cy = px[len(px) // 2], py[len(py) // 2]
+    dev = sorted([abs(xs[i] - cx) for i in idx] + [abs(ys[i] - cy) for i in idx])
+    r = 1.4 * dev[len(dev) // 2]  # median |offset| of a circle ≈ 0.7 r
+    return cx, cy, r
+
+
+def slash_points(cx, cy, r):
+    """Hand-drawn-ish slash through the o: slightly bowed, jittered endpoints."""
+    dx, dy = 0.8 * r, 1.35 * r  # lower-left to upper-right, just past the bowl
+    j = 0.12 * r
     p0 = (cx - dx + _rng.uniform(-j, j), cy + dy + _rng.uniform(-j, j))
     p1 = (cx + dx + _rng.uniform(-j, j), cy - dy + _rng.uniform(-j, j))
     bow = _rng.uniform(-0.06, 0.06) * math.hypot(p1[0] - p0[0], p1[1] - p0[1])
@@ -153,10 +168,18 @@ def synthesize(text, checkpoint, bias, seed=None):
     synth = HandwritingSynthesizer.load(str(checkpoint), device, bias)
     model_text, targets = substitute(text, synth.tokenizer.charset)
     c = synth._encode_text(model_text + " ")  # sentinel, as in visualize_attention
-    with torch.no_grad():
-        seq, phi = synth.model.sample_means_with_attention(
-            context=c, steps=synth.num_steps, stochastic=True
-        )
+    for attempt in range(5):
+        with torch.no_grad():
+            seq, phi = synth.model.sample_means_with_attention(
+                context=c, steps=synth.num_steps, stochastic=True
+            )
+        # every non-space char should win the attention argmax at some point;
+        # a char that never does was likely skipped by the sampler
+        peaks = set(phi.argmax(dim=1).tolist())
+        skipped = [ch for i, ch in enumerate(model_text) if ch != " " and i not in peaks]
+        if not skipped:
+            break
+        print(f"attention skipped {skipped}, resampling ({attempt + 1}/5)", file=sys.stderr)
     seq = synth._undo_normalization(seq.cpu())
     xs, ys, eos = split_into_components(seq)
     phi = phi.cpu()
@@ -170,9 +193,9 @@ def synthesize(text, checkpoint, bias, seed=None):
     polylines = [list(s) for s in get_strokes(xs, ys, torch.as_tensor(eos))]
     for char_index, kind, upper in targets:
         if kind == "ring":
-            polylines.append(ring_points(char_bbox(xs, ys, phi, char_index), upper))
+            polylines.append(ring_points(*char_center_radius(xs, ys, phi, char_index), upper))
         elif kind == "slash":
-            polylines.append(slash_points(char_bbox(xs, ys, phi, char_index)))
+            polylines.append(slash_points(*char_center_radius(xs, ys, phi, char_index)))
     return polylines
 
 

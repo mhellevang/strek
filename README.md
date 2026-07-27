@@ -281,6 +281,20 @@ strokes. Three techniques, happily combined:
    Fonts and their licenses: [calligraphy/fonts/CREDITS.md](calligraphy/fonts/CREDITS.md).
    Other options: 3dplotter.xyz has 50+ built in; Inkscape has the Hershey
    Text extension; `vpype text` from the command line
+
+   For NN-generated handwriting there is
+   [`calligraphy/nn_text2svg.py`](calligraphy/nn_text2svg.py) — a Graves
+   RNN with programmatic `æøå` (attention-placed diacritics, auto-resample
+   on skipped letters). Requires
+   [pytorch-handwriting-synthesis-toolkit](https://github.com/X-rayLaser/pytorch-handwriting-synthesis-toolkit)
+   cloned to `~/git` with a `venv/` (torch 1.x) and the pretrained
+   `checkpoints/Epoch_56`; the script re-execs into that venv by itself:
+
+   ```
+   python3 calligraphy/nn_text2svg.py "Blåbærsyltetøy på brød" --trials 5
+   ```
+
+   Background: [docs/research/nn-handwriting-aeoeaa.md](docs/research/nn-handwriting-aeoeaa.md)
 2. **The pen does the calligraphy** — broad-edge calligraphy IS a pen at
    a constant angle where stroke width varies with direction, and a
    plotter holds the angle perfectly. Pilot Parallel + a simple script
