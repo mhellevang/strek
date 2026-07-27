@@ -76,33 +76,21 @@ def char_indices(phi, char_index):
     return torch.arange(len(mask))[mask].tolist()
 
 
-def char_bbox(xs, ys, phi, char_index):
-    """Percentile-trimmed bbox (attention smears across neighbours)."""
-    idx = char_indices(phi, char_index)
-    px = sorted(xs[i] for i in idx)
-    py = sorted(ys[i] for i in idx)
-
-    def pct(v, q):
-        return v[min(int(q * len(v)), len(v) - 1)]
-
-    return pct(px, 0.10), pct(py, 0.10), pct(px, 0.90), pct(py, 0.90)
-
-
 def squeeze_ligature(xs, ys, phi, a_index):
-    """Pull the letter after `a_index` leftward so 'ae' touches into an æ ligature.
+    """Pull the letter after `a_index` leftward so 'ae' fuses into an æ ligature.
 
-    Shifts every point from the second letter's first timestep onward, with a
-    short ramp over the preceding points so a connecting cursive stroke bends
-    instead of jumping.
+    Cursive strokes connect the letters, so there is no whitespace gap to
+    close — instead aim for a target distance between the letter *centres*
+    (the e's left bowl should share the a's right side). Shifts every point
+    from the second letter's first timestep onward, with a short ramp over
+    the preceding points so the connecting stroke bends instead of jumping.
     """
-    a_idx = char_indices(phi, a_index)
     e_idx = char_indices(phi, a_index + 1)
-    if not a_idx or not e_idx:
+    if not e_idx:
         return
-    a_right = max(xs[i] for i in a_idx)
-    e_left = min(xs[i] for i in e_idx)
-    _, y0, _, y1 = char_bbox(xs, ys, phi, a_index)
-    delta = (e_left - a_right) + 0.08 * (y1 - y0)  # end slightly overlapping
+    a_cx, _, a_r = char_center_radius(xs, ys, phi, a_index)
+    e_cx, _, e_r = char_center_radius(xs, ys, phi, a_index + 1)
+    delta = (e_cx - a_cx) - 0.6 * (a_r + e_r)
     if delta <= 0:
         return
     t0 = min(e_idx)
