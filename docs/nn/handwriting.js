@@ -65,7 +65,8 @@ class Synthesizer {
   }
 
   // One full sampling run. Returns {seq: [[dx,dy,eos],...], phi: [Float32Array(U),...]}
-  async sample(c, U, { bias = 0.8, stochastic = true, maxSteps = 1500 } = {}) {
+  // opts.prime: normalized [dx,dy,eos] rows fed through the net first (style priming)
+  async sample(c, U, { bias = 0.8, stochastic = true, maxSteps = 1500, prime = null } = {}) {
     const { ort, session } = this;
     // state inputs got renamed on export (w.3, k.1, ...) — map positionally:
     // x, c, w, k, h1, c1, h2, c2, h3, c3, bias
@@ -80,6 +81,15 @@ class Synthesizer {
       [H3]: st(400), [C3]: st(400),
       [B]: new ort.Tensor("float32", Float32Array.of(bias), [1]),
     };
+    if (prime) {
+      for (const [dx, dy, e] of prime) {
+        const o = await session.run(feed);
+        feed[X] = new ort.Tensor("float32", Float32Array.of(dx, dy, e), [1, 1, 3]);
+        feed[W] = o.w; feed[K] = o.k;
+        feed[H1] = o.h1; feed[C1] = o.c1; feed[H2] = o.h2; feed[C2] = o.c2;
+        feed[H3] = o.h3; feed[C3] = o.c3;
+      }
+    }
     const seq = [], phis = [];
     for (let t = 0; t < maxSteps; t++) {
       const o = await session.run(feed);
@@ -112,16 +122,29 @@ class Synthesizer {
     return { seq, phi: phis };
   }
 
+  // Style sample ({chars, strokes} in sjvasquez form: unit-median-norm offsets,
+  // y inverted) -> normalized rows ready to prime with.
+  normalizeStyle(style) {
+    const K = 12; // ≈ the model's median offset norm in raw units
+    const [muX, muY] = this.meta.mu, [sdX, sdY] = this.meta.std;
+    return style.strokes.map(([dx, dy, e]) =>
+      [(dx * K - muX) / sdX, (dy * -K - muY) / sdY, e]);
+  }
+
   // text (æøå ok) -> polylines [[x,y],...][] in model units, diacritics drawn in.
+  // opts.style: entry from styles.json — primes the net to imitate that hand.
   async synthesize(text, opts = {}) {
     const { modelText, targets } = substitute(text, this.meta.charset);
-    const c = this.encode(modelText + " "); // sentinel, as in visualize_attention
-    const U = modelText.length + 1;
+    const styleChars = opts.style ? opts.style.chars : "";
+    const off = styleChars.length; // generation chars start here in the combined c
+    const c = this.encode(styleChars + modelText + " "); // sentinel, as in visualize_attention
+    const U = off + modelText.length + 1;
+    const prime = opts.style ? this.normalizeStyle(opts.style) : null;
 
     let seq, phi;
     for (let attempt = 0; attempt < 5; attempt++) {
-      ({ seq, phi } = await this.sample(c, U, opts));
-      const skipped = skippedChars(modelText, phi);
+      ({ seq, phi } = await this.sample(c, U, { ...opts, prime }));
+      const skipped = skippedChars(modelText, phi, off);
       if (!skipped.length) break;
       console.warn(`attention skipped ${skipped}, resampling (${attempt + 1}/5)`);
     }
@@ -138,12 +161,12 @@ class Synthesizer {
     // ligature squeezes mutate xs, so run them (in temporal order) before
     // measuring diacritic geometry or building stroke polylines
     for (const [ci, kind] of targets) {
-      if (kind === "ligature") squeezeLigature(xs, ys, phi, ci);
+      if (kind === "ligature") squeezeLigature(xs, ys, phi, off + ci);
     }
     const polylines = strokes(xs, ys, eos);
     for (const [ci, kind, upper] of targets) {
-      if (kind === "ring") polylines.push(ringPoints(...centerRadius(xs, ys, phi, ci), upper));
-      else if (kind === "slash") polylines.push(slashPoints(...centerRadius(xs, ys, phi, ci)));
+      if (kind === "ring") polylines.push(ringPoints(...centerRadius(xs, ys, phi, off + ci), upper));
+      else if (kind === "slash") polylines.push(slashPoints(...centerRadius(xs, ys, phi, off + ci)));
     }
     return polylines;
   }
@@ -179,9 +202,9 @@ function gauss() { // Box-Muller
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-function skippedChars(modelText, phi) {
+function skippedChars(modelText, phi, off = 0) {
   const peaks = new Set(phi.map(argmax));
-  return [...modelText].filter((ch, i) => ch !== " " && !peaks.has(i));
+  return [...modelText].filter((ch, i) => ch !== " " && !peaks.has(off + i));
 }
 
 // timesteps whose stroke points the model attributes to one character

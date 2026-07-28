@@ -104,13 +104,17 @@
 
       <fieldset id="nnFields" hidden>
         <legend class="microlabel">NN-håndskrift</legend>
+        <div class="row"><div class="field"><label for="nnStyle">Stil</label><select id="nnStyle">
+          <option value="">Standard (ingen stil)</option>
+        </select></div></div>
         <div class="row">
           <div class="field"><label for="bias">Ryddighet <span id="biasVal">0.8</span></label>
-            <input type="range" id="bias" min="0.2" max="2" step="0.1" value="0.8" style="width:100%"></div>
+            <input type="range" id="bias" min="0.1" max="2" step="0.05" value="0.8" style="width:100%"></div>
           <div class="field" style="align-self:end"><button id="reroll" type="button" style="width:100%">Ny variant</button></div>
         </div>
         <p class="hint">Nevralt nett skriver teksten for hånd — hver variant er unik.
-          Æøå tegnes programmatisk. Modellen (28 MB) lastes første gang og caches.</p>
+          Æøå tegnes programmatisk. Løkkeskrift-stilene trenger lav ryddighet (&le; 0.4).
+          Modellen (28 MB) lastes første gang og caches.</p>
       </fieldset>
 
       <fieldset>
@@ -220,7 +224,7 @@ function toSvg(strokes, w, h, margin = 2) {
 
 /* ---- NN handwriting mode (nn/handwriting.js, lazy-loaded) ---- */
 const isNN = () => $("font").value === "__nn__";
-let NN = null;                                  // {synth, toSvg} once loaded
+let NN = null;                                  // {synth, styles} once loaded
 let nnKey = "", nnResult = null, nnSeq = 0, nnRoll = 0, nnTimer = 0;
 
 async function ensureNN() {
@@ -232,8 +236,14 @@ async function ensureNN() {
     document.head.appendChild(s);
   });
   const mod = await import("./nn/handwriting.js");
-  const synth = await mod.loadSynthesizer();
-  NN = { synth, toSvg: mod.toSvg };
+  const [synth, styles] = await Promise.all([
+    mod.loadSynthesizer(),
+    fetch("nn/styles.json").then((r) => (r.ok ? r.json() : [])),
+  ]);
+  $("nnStyle").innerHTML = `<option value="">Standard (ingen stil)</option>` +
+    styles.map((s, i) =>
+      `<option value="${i}">Stil ${s.id + 1}${s.cursive ? " — løkkeskrift (lav ryddighet)" : ""}</option>`).join("");
+  NN = { synth, styles };
   return NN;
 }
 
@@ -242,7 +252,8 @@ async function nnGenerate() {
   const size = Number($("size").value) || 10;
   const lh = $("lh").value.trim() === "" ? 1.8 * size : Number($("lh").value);
   const bias = Number($("bias").value);
-  const key = JSON.stringify([text, size, lh, bias, nnRoll]);
+  const styleIdx = $("nnStyle").value;
+  const key = JSON.stringify([text, size, lh, bias, styleIdx, nnRoll]);
   if (!text) { nnResult = null; nnKey = key; renderNN(); return; }
   if (key === nnKey) { renderNN(); return; }
 
@@ -251,12 +262,13 @@ async function nnGenerate() {
   $("previewEmpty").textContent = NN ? "Skriver…" : "Laster modell (28 MB første gang)…";
   $("messages").innerHTML = "";
   try {
-    const { synth } = await ensureNN();
+    const { synth, styles } = await ensureNN();
+    const style = styleIdx === "" ? null : styles[Number(styleIdx)];
     const lines = text.split("\n").map(s => s.trim()).filter(Boolean);
     const strokes = [];
     let wMax = 0;
     for (const [i, line] of lines.entries()) {
-      const polys = await synth.synthesize(line, { bias });
+      const polys = await synth.synthesize(line, { bias, style });
       if (seq !== nnSeq) return;                // stale — newer request underway
       // scale this line's ink to `size` mm tall, stack at i*lh
       const pts = polys.flat();
@@ -390,6 +402,7 @@ document.querySelector(".file").addEventListener("keydown", e => {
 for (const id of ["text", "font", "size", "ls", "lh", "smooth", "bias"])
   $(id).addEventListener("input", refresh);
 $("font").addEventListener("change", refresh);
+$("nnStyle").addEventListener("change", refresh);
 $("bias").addEventListener("input", () => { $("biasVal").textContent = $("bias").value; });
 $("reroll").addEventListener("click", () => { nnRoll++; refresh(); });
 
