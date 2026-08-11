@@ -707,9 +707,13 @@ function renderPreview(res) {
 
   if (res && res.paperRect) {
     const [px0, px1, py0, py1] = res.paperRect;
-    // jig arms along back + right paper edges
-    svg.appendChild(el("rect", { x: px0 - 3, y: flipY(py1) - 8, width: px1 - px0 + 14, height: 8, fill: "#E3E6EC" }));
-    svg.appendChild(el("rect", { x: px1, y: flipY(py1) - 8, width: 11, height: py1 - py0 + 8, fill: "#E3E6EC" }));
+    // jig v2: window frame around the sheet (13 mm left / 15 mm front
+    // borders), lips hook over the plate's back + right edges; the back
+    // lip ends at x=88 (cut away for the plate's rear handle tab)
+    const fx0 = px0 - 13, fy0 = py0 - 15, fout = BED + 2.5;
+    svg.appendChild(el("rect", { x: fx0, y: flipY(fout), width: fout - fx0, height: fout - fy0, fill: "#E3E6EC", stroke: "#B7C0CE", "stroke-width": 0.5 }));
+    svg.appendChild(el("rect", { x: fx0, y: flipY(fout), width: 88 - fx0, height: 2.5, fill: "#C4CBD6" }));
+    svg.appendChild(el("rect", { x: BED, y: flipY(fout), width: 2.5, height: fout - fy0, fill: "#C4CBD6" }));
     // paper: unreachable tint below, reachable white on top
     svg.appendChild(el("rect", { x: px0, y: flipY(py1), width: px1 - px0, height: py1 - py0, fill: "#EFEFE9", stroke: "#1C2740", "stroke-width": 0.5 }));
     if (res.window) {
