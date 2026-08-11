@@ -107,10 +107,10 @@ assumes them.
    works opened straight from disk), drop in the SVG, preview the
    toolpath and download the `.gcode`. Choose A5 or custom paper size;
    the preview shows the drawing's margins on the sheet
-3. Transfer to the printer: microSD, or FTP over LAN
-   (`ftps://<printer-ip>`, port 990, user `bblp` + access code from the
-   printer screen). Start the file from the printer screen — the P2S
-   runs raw `.gcode`
+3. Transfer to the printer: `scripts/send.sh file.gcode` (FTPS over
+   LAN — needs `brew install lftp` and the access code from the printer
+   screen in `scripts/.env`), or microSD. Start the file from the
+   printer screen — the P2S runs raw `.gcode`
 4. The file homes first (**without** the pen), parks near the front and
    pauses (`M400 U1`) — mount the pen, press resume. It plots with
    progress on the screen, then parks at the back and pauses — **take
